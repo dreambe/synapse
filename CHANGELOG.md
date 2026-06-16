@@ -9,6 +9,13 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Loop control (loop engineering).** Stopping guards beyond the iteration cap:
+  `max_repeated_tool_calls` (loop detection — same call recurring across turns →
+  `loop_detected`), `max_consecutive_tool_errors` (circuit breaker →
+  `tool_errors_exhausted`), and `max_no_progress` (same tool-call set repeating →
+  `no_progress`). Each stops the run gracefully with a descriptive `stop_reason`;
+  off by default, and loop detection counts per-turn so parallel fan-out isn't
+  falsely flagged.
 - **Structured outputs.** Give a run an `output_schema` (JSON Schema) or a
   `response_model` (Pydantic); the schema is described to the model and the
   final answer is parsed + validated into `RunResult.parsed` (provider-neutral,

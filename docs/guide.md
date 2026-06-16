@@ -24,6 +24,32 @@ def deploy(service: str) -> str:
     ...
 ```
 
+## Loop control (loop engineering)
+
+Treat the agent loop as an engineering artifact: design how it *stops*. Beyond
+the hard iteration cap (`max_iterations`), wall-clock `timeout`, and
+`token_budget`, three guards catch the classic runaway modes — each stops the
+run gracefully with a descriptive `stop_reason` (the partial work is in
+`result.messages`):
+
+```python
+result = agent.run(
+    task,
+    max_iterations=30,
+    max_repeated_tool_calls=3,       # same call across >3 turns → "loop_detected"
+    max_consecutive_tool_errors=3,   # 3 all-failing turns in a row → "tool_errors_exhausted"
+    max_no_progress=3,               # same tool-call set 3 turns running → "no_progress"
+    timeout=120, token_budget=200_000,
+)
+if result.stop_reason != "end_turn":
+    ...  # hit a guard — inspect and decide
+```
+
+These are **off by default** (the iteration cap is the baseline). Loop
+detection counts per *turn*, so legitimate parallel fan-out of identical calls
+in one turn does not trip it. For a verifiable "done" condition (not just "stop
+looping"), combine with `verify=`.
+
 ## Structured outputs
 
 Get typed, validated results — not just free text — so an agent can feed
@@ -132,6 +158,9 @@ agent.run("...", max_iterations=8, token_budget=200_000, timeout=60)
 | `timeout` | Wall-clock seconds; raises `RunTimeout`. |
 | `tool_timeout` | Per-tool seconds; a timeout becomes a tool error. |
 | `max_parallel_tools` | Bound concurrent tool execution in a turn. |
+| `max_repeated_tool_calls` | Stop if one tool call recurs across more than N turns (`loop_detected`). |
+| `max_consecutive_tool_errors` | Circuit breaker: stop after N all-failing turns (`tool_errors_exhausted`). |
+| `max_no_progress` | Stop if the same tool-call set repeats N turns running (`no_progress`). |
 | `input_guardrails` / `output_guardrails` | Validate/transform text. |
 | `compactor` | Summarize old turns when history grows (see Context). |
 | `checkpointer` + `run_id` | Persist/resume run state. |

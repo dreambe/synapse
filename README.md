@@ -249,6 +249,7 @@ result = agent.run(
 | Provider-neutral backends | `AnthropicModel`, `OpenAIModel` (+ any OpenAI-compatible) | **solid** |
 | Bounded tool concurrency | `max_parallel_tools=` | **solid** |
 | Wall-clock + per-tool timeouts | `timeout=`, `tool_timeout=` → `RunTimeout` | **solid** |
+| Loop control (loop detection / no-progress / circuit breaker) | `max_repeated_tool_calls=`, `max_no_progress=`, `max_consecutive_tool_errors=` | **solid** |
 | Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
 | Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | **solid** |
 | Verifier loop (iterate-until-pass) | `verify=` → `Verdict` | **solid** |

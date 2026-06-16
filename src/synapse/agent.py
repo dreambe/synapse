@@ -113,6 +113,9 @@ class Agent:
             output_schema=opts.get("output_schema"),
             response_model=opts.get("response_model"),
             validate_tool_inputs=bool(opts.get("validate_tool_inputs")),
+            max_repeated_tool_calls=opts.get("max_repeated_tool_calls"),
+            max_consecutive_tool_errors=opts.get("max_consecutive_tool_errors"),
+            max_no_progress=opts.get("max_no_progress"),
             tool_search=(
                 self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
             ),
@@ -141,6 +144,9 @@ class Agent:
         output_schema: dict | None = None,
         response_model: type | None = None,
         validate_tool_inputs: bool = False,
+        max_repeated_tool_calls: int | None = None,
+        max_consecutive_tool_errors: int | None = None,
+        max_no_progress: int | None = None,
         tool_search: bool | None = None,
     ) -> RunResult:
         """Run this agent to completion (async). The canonical, typed entry point."""
@@ -163,6 +169,9 @@ class Agent:
             output_schema=output_schema,
             response_model=response_model,
             validate_tool_inputs=validate_tool_inputs,
+            max_repeated_tool_calls=max_repeated_tool_calls,
+            max_consecutive_tool_errors=max_consecutive_tool_errors,
+            max_no_progress=max_no_progress,
             tool_search=tool_search,
         )
         return await arun_agent(self, user_input, session=session, context=ctx)

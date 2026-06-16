@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import threading
 from dataclasses import dataclass, field
 from typing import (
@@ -131,6 +132,10 @@ class RunContext:
     output_schema: Optional[dict] = None
     response_model: Optional[type] = None
     validate_tool_inputs: bool = False
+    # Loop engineering: stopping guards beyond max_iterations.
+    max_repeated_tool_calls: Optional[int] = None
+    max_consecutive_tool_errors: Optional[int] = None
+    max_no_progress: Optional[int] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -312,6 +317,12 @@ async def _drive_stream(
     if ctx.output_schema:
         system = (system + "\n\n" + schema_instruction(ctx.output_schema)).strip()
 
+    # Loop-engineering guard state (across iterations).
+    call_turns: dict[tuple, int] = {}
+    consecutive_errors = 0
+    last_turn_sig: Optional[tuple] = None
+    no_progress = 0
+
     iterations = 0
     for iterations in range(1, ctx.max_iterations + 1):
         if deadline is not None and loop.time() > deadline:
@@ -347,6 +358,25 @@ async def _drive_stream(
             return
 
         uses = response.message.tool_uses
+        sigs = [(b.name, json.dumps(b.input, sort_keys=True, default=str)) for b in uses]
+
+        # No-progress: the same set of tool calls repeated turn after turn.
+        if ctx.max_no_progress is not None and uses:
+            turn_sig = tuple(sorted(sigs))
+            no_progress = no_progress + 1 if turn_sig == last_turn_sig else 0
+            last_turn_sig = turn_sig
+            if no_progress >= ctx.max_no_progress:
+                yield _TurnInfo(iterations, "no_progress")
+                return
+
+        # Loop detection: one tool call signature recurring across too many turns.
+        if ctx.max_repeated_tool_calls is not None and uses:
+            for sig in set(sigs):
+                call_turns[sig] = call_turns.get(sig, 0) + 1
+            if any(c > ctx.max_repeated_tool_calls for c in call_turns.values()):
+                yield _TurnInfo(iterations, "loop_detected")
+                return
+
         for block in uses:
             yield ToolCall(id=block.id, name=block.name, input=block.input)
 
@@ -361,6 +391,13 @@ async def _drive_stream(
 
         if ctx.checkpointer is not None and ctx.run_id is not None:
             await ctx.checkpointer.save(ctx.run_id, messages)
+
+        # Circuit breaker: every tool call in the turn failed, repeatedly.
+        if ctx.max_consecutive_tool_errors is not None and results:
+            consecutive_errors = consecutive_errors + 1 if all(r.is_error for r in results) else 0
+            if consecutive_errors >= ctx.max_consecutive_tool_errors:
+                yield _TurnInfo(iterations, "tool_errors_exhausted")
+                return
 
     yield _TurnInfo(iterations, "max_iterations")
 
