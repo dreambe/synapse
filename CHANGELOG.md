@@ -9,6 +9,12 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Skills (progressive disclosure).** A skill is a folder (`SKILL.md` front
+  matter + instructions + optional bundled files). `load_skills(dir)` /
+  `Skill.from_directory` discover them; `Agent(skills=...)` puts each skill's
+  *description* in context and adds `load_skill` / `read_skill_file` tools so
+  the model loads full instructions and bundled resources (text/image/document)
+  only when relevant. Path-traversal-guarded.
 - **Provider-neutral backends.** Added `OpenAIModel` — works with any OpenAI
   Chat Completions-compatible endpoint (OpenAI, Azure, Together, Groq, Ollama,
   vLLM, …) via `base_url`. Proves the `Model` abstraction; Anthropic stays the

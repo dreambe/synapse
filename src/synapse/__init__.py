@@ -75,6 +75,7 @@ from .runtime import (
     arun_stream,
     run_agent,
 )
+from .skill import Skill, load_skills, skill_tools
 from .streaming import RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
 from .team import Blackboard, Team
 from .tool import Tool, tool
@@ -137,6 +138,10 @@ __all__ = [
     # routing
     "Router",
     "ModelRouter",
+    # skills
+    "Skill",
+    "load_skills",
+    "skill_tools",
     # context engineering
     "Compactor",
     "select_tools",

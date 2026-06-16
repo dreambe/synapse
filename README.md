@@ -253,6 +253,7 @@ result = agent.run(
 | Token budgets | `token_budget=` | **solid** |
 | MCP tools | `synapse.mcp.tools_from_session` | **solid** |
 | A2A protocol v0.3.0 (JSON-RPC, tasks, SSE) | `create_a2a_app`, `A2AClient` | **solid** |
+| Skills (progressive disclosure) | `Skill`, `load_skills`, `Agent(skills=...)` | **solid** |
 | Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | first cut — keyword search |
 | Routing | `Router`, `ModelRouter` | first cut — `Router` keyword-based |
 | Tool search | `Agent(tool_search=True)`, `select_tools` | first cut — keyword ranking |
@@ -310,6 +311,7 @@ Anthropic  OpenAI*    Echo      Scripted
 | `synapse.registry`    | `AgentRegistry` for name-based lookup/routing         |
 | `synapse.router`      | `Router` / `ModelRouter` — pick an agent, then run it |
 | `synapse.observability` | Hooks, lifecycle events, token `Usage`              |
+| `synapse.skill`       | Skills: `SKILL.md` folders, progressive disclosure    |
 | `synapse.memory`      | Cross-run `Memory` backends + auto memory tools       |
 | `synapse.guardrails`  | Input/output guardrails                               |
 | `synapse.context`     | `Compactor` and tool selection (context engineering)  |

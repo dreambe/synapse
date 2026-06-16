@@ -17,6 +17,7 @@ from .guardrails import Guardrail
 from .memory import Memory, memory_tools
 from .models import Model, default_model
 from .observability import Hooks
+from .skill import Skill, skill_catalog, skill_tools
 from .runtime import (
     ApprovalCallback,
     RunContext,
@@ -48,19 +49,25 @@ class Agent:
         model: Model | None = None,
         tools: list[Tool] | None = None,
         memory: Memory | None = None,
+        skills: list[Skill] | None = None,
         tool_search: bool = False,
         version: str = "0.1.0",
     ) -> None:
         self.name = name
-        self.instructions = instructions
         self.description = description or instructions.split("\n")[0][:200]
         self.model = model or default_model()
         self.tools: list[Tool] = list(tools or [])
         self.memory = memory
+        self.skills = list(skills or [])
         self.tool_search = tool_search
         self.version = version
         if memory is not None:
             self.tools.extend(memory_tools(memory))
+        # Skills: descriptions go into context now; full instructions load on demand.
+        if self.skills:
+            self.tools.extend(skill_tools(self.skills))
+            instructions = (instructions + "\n\n" + skill_catalog(self.skills)).strip()
+        self.instructions = instructions
 
     @property
     def tool_map(self) -> dict[str, Tool]:

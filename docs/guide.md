@@ -157,6 +157,44 @@ agent.run(
 Input guardrails run before the loop (a violation raises `GuardrailViolation`);
 output guardrails transform/validate the final answer.
 
+## Skills
+
+A *skill* is a folder of packaged expertise loaded on demand. Layout:
+
+```
+skills/
+  fill-pdf/
+    SKILL.md          # front matter (name, description) + instructions
+    template.pdf      # bundled resources (optional)
+```
+
+```markdown
+---
+name: fill-pdf
+description: Fill out PDF forms from structured data.
+---
+To fill a form: read template.pdf, map fields to the data, then ...
+```
+
+Attach skills to an agent:
+
+```python
+from synapse import Agent, load_skills
+agent = Agent("assistant", skills=load_skills("skills"))
+```
+
+**Progressive disclosure** — only each skill's *description* sits in the agent's
+context by default (cheap). The agent loads a skill's full instructions on
+demand by calling the `load_skill(name)` tool, and fetches bundled files with
+`read_skill_file(skill, filename)` (which returns text, an `ImageBlock`, or a
+`DocumentBlock` — so binary resources flow in multimodally). Both tools are
+added automatically when `skills=` is set. Build skills in code too:
+
+```python
+from synapse import Skill
+Skill(name="sql", description="Write safe SQL.", instructions="Always parametrize ...")
+```
+
 ## Memory (cross-run)
 
 `Session` is per-conversation; a `Memory` persists across runs. Attaching one
