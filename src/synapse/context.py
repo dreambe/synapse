@@ -68,7 +68,11 @@ def _score(query: str, tool: "Tool") -> int:
 
 
 def select_tools(query: str, tools: list["Tool"], k: int = 5) -> list["Tool"]:
-    """Return up to ``k`` tools most relevant to ``query`` (keyword overlap)."""
+    """Return up to ``k`` tools most relevant to ``query``.
+
+    Experimental / first cut: ranking is keyword overlap. Replace with an
+    embedding or LLM ranker for large or nuanced tool sets.
+    """
     scored = sorted(tools, key=lambda t: _score(query, t), reverse=True)
     relevant = [t for t in scored if _score(query, t) > 0]
     return (relevant or scored)[:k]

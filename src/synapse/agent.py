@@ -1,15 +1,17 @@
 """The Agent: the central abstraction of synapse.
 
 An agent bundles instructions, tools, and a model backend. It can be run
-directly (sync or async), exposed as a tool to another agent (in-process A2A),
-served over HTTP, or described by an agent card. Runs may opt into
-observability hooks, tool approval, verification, guardrails, budgets,
-compaction, checkpointing, and tool search via keyword arguments.
+directly (sync, async, or streaming), exposed as a tool to another agent
+(in-process A2A), served over HTTP, or described by an agent card.
+
+The canonical configuration object is :class:`~synapse.runtime.RunContext`;
+the keyword arguments on :meth:`arun` are convenience sugar over it. ``run``
+and ``astream`` are thin forwarders, so there is one option surface to learn.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, AsyncIterator, Callable
 
 from .guardrails import Guardrail
 from .memory import Memory, memory_tools
@@ -22,8 +24,10 @@ from .runtime import (
     Session,
     Verifier,
     arun_agent,
-    run_agent,
+    arun_stream,
+    run_sync,
 )
+from .streaming import RunEvent
 from .tool import Tool
 
 if TYPE_CHECKING:
@@ -65,7 +69,6 @@ class Agent:
     # -- composition ---------------------------------------------------------
 
     def add_tool(self, t: Tool) -> "Agent":
-        """Register a tool and return self for chaining."""
         self.tools.append(t)
         return self
 
@@ -85,21 +88,24 @@ class Agent:
     def _context(self, max_iterations: int, context: RunContext | None, **opts) -> RunContext:
         if context is not None:
             return context
-        provided = {k: v for k, v in opts.items() if v is not None}
         return RunContext(
             max_iterations=max_iterations,
-            tool_search=opts.get("tool_search") if opts.get("tool_search") is not None
-            else self.tool_search,
-            hooks=provided.get("hooks"),
-            approval=provided.get("approval"),
-            verify=provided.get("verify"),
-            max_verify_rounds=provided.get("max_verify_rounds", 3),
-            token_budget=provided.get("token_budget"),
-            input_guardrails=provided.get("input_guardrails", []),
-            output_guardrails=provided.get("output_guardrails", []),
-            compactor=provided.get("compactor"),
-            checkpointer=provided.get("checkpointer"),
-            run_id=provided.get("run_id"),
+            hooks=opts.get("hooks"),
+            approval=opts.get("approval"),
+            verify=opts.get("verify"),
+            max_verify_rounds=opts.get("max_verify_rounds") or 3,
+            token_budget=opts.get("token_budget"),
+            timeout=opts.get("timeout"),
+            tool_timeout=opts.get("tool_timeout"),
+            max_parallel_tools=opts.get("max_parallel_tools"),
+            input_guardrails=opts.get("input_guardrails") or [],
+            output_guardrails=opts.get("output_guardrails") or [],
+            compactor=opts.get("compactor"),
+            checkpointer=opts.get("checkpointer"),
+            run_id=opts.get("run_id"),
+            tool_search=(
+                self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
+            ),
         )
 
     async def arun(
@@ -114,6 +120,9 @@ class Agent:
         verify: Verifier | None = None,
         max_verify_rounds: int = 3,
         token_budget: int | None = None,
+        timeout: float | None = None,
+        tool_timeout: float | None = None,
+        max_parallel_tools: int | None = None,
         input_guardrails: list[Guardrail] | None = None,
         output_guardrails: list[Guardrail] | None = None,
         compactor: "Compactor | None" = None,
@@ -121,7 +130,7 @@ class Agent:
         run_id: str | None = None,
         tool_search: bool | None = None,
     ) -> RunResult:
-        """Run this agent to completion (async)."""
+        """Run this agent to completion (async). The canonical, typed entry point."""
         ctx = self._context(
             max_iterations,
             context,
@@ -130,6 +139,9 @@ class Agent:
             verify=verify,
             max_verify_rounds=max_verify_rounds,
             token_budget=token_budget,
+            timeout=timeout,
+            tool_timeout=tool_timeout,
+            max_parallel_tools=max_parallel_tools,
             input_guardrails=input_guardrails,
             output_guardrails=output_guardrails,
             compactor=compactor,
@@ -139,42 +151,24 @@ class Agent:
         )
         return await arun_agent(self, user_input, session=session, context=ctx)
 
-    def run(
+    def run(self, user_input: str, **kwargs) -> RunResult:
+        """Synchronous wrapper — accepts the same keyword arguments as :meth:`arun`."""
+        return run_sync(self.arun(user_input, **kwargs))
+
+    def astream(
         self,
         user_input: str,
         *,
-        max_iterations: int = 12,
         session: Session | None = None,
+        max_iterations: int = 12,
         context: RunContext | None = None,
-        hooks: Hooks | None = None,
-        approval: ApprovalCallback | None = None,
-        verify: Verifier | None = None,
-        max_verify_rounds: int = 3,
-        token_budget: int | None = None,
-        input_guardrails: list[Guardrail] | None = None,
-        output_guardrails: list[Guardrail] | None = None,
-        compactor: "Compactor | None" = None,
-        checkpointer: "Checkpointer | None" = None,
-        run_id: str | None = None,
-        tool_search: bool | None = None,
-    ) -> RunResult:
-        """Synchronous convenience wrapper around :meth:`arun`."""
-        ctx = self._context(
-            max_iterations,
-            context,
-            hooks=hooks,
-            approval=approval,
-            verify=verify,
-            max_verify_rounds=max_verify_rounds,
-            token_budget=token_budget,
-            input_guardrails=input_guardrails,
-            output_guardrails=output_guardrails,
-            compactor=compactor,
-            checkpointer=checkpointer,
-            run_id=run_id,
-            tool_search=tool_search,
-        )
-        return run_agent(self, user_input, session=session, context=ctx)
+        **kwargs,
+    ) -> AsyncIterator[RunEvent]:
+        """Run this agent and yield events as they happen (text deltas, tool
+        calls, tool outputs), ending with ``RunComplete``. Same options as
+        :meth:`arun`."""
+        ctx = self._context(max_iterations, context, **kwargs)
+        return arun_stream(self, user_input, session=session, context=ctx)
 
     # -- agent-to-agent ------------------------------------------------------
 
@@ -194,9 +188,7 @@ class Agent:
         return Tool(
             name=tool_name,
             description=(
-                description
-                or self.description
-                or f"Delegate a task to the {self.name} agent."
+                description or self.description or f"Delegate a task to the {self.name} agent."
             ),
             parameters={
                 "type": "object",

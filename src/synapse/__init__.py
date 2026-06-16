@@ -60,15 +60,18 @@ from .runtime import (
     ApprovalDecision,
     RunContext,
     RunResult,
+    RunTimeout,
     Session,
     Verdict,
     arun_agent,
+    arun_stream,
     run_agent,
 )
+from .streaming import RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
 from .team import Blackboard, Team
 from .tool import Tool, tool
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # core
@@ -82,9 +85,17 @@ __all__ = [
     "ToolResultBlock",
     "RunResult",
     "RunContext",
+    "RunTimeout",
     "Session",
     "run_agent",
     "arun_agent",
+    "arun_stream",
+    # streaming
+    "RunEvent",
+    "TextDelta",
+    "ToolCall",
+    "ToolOutput",
+    "RunComplete",
     # models
     "Model",
     "ModelResponse",

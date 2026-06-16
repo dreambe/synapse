@@ -44,7 +44,11 @@ def _score(query: str, text: str) -> int:
 
 
 class InMemoryMemory(Memory):
-    """Process-local memory with keyword search. The zero-dependency default."""
+    """Process-local memory with keyword search. The zero-dependency default.
+
+    Experimental / first cut: ``search`` is lexical overlap, not semantic.
+    Implement :class:`Memory` over an embedding store for production recall.
+    """
 
     def __init__(self) -> None:
         self._items: list[MemoryItem] = []

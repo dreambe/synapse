@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import urllib.error
 import urllib.request
+from typing import AsyncIterator
 
 from ..errors import A2AError
 from ..tool import Tool
 from .protocol import AgentCard, RunRequest, RunResponse
 from .server import CARD_PATH
+
+_STREAM_DONE = object()
 
 
 class RemoteAgent:
@@ -89,6 +93,53 @@ class RemoteAgent:
             session_id=session_id,
             max_iterations=max_iterations,
         )
+
+    async def astream(
+        self,
+        input: str,
+        *,
+        session_id: str | None = None,
+        max_iterations: int = 12,
+    ) -> AsyncIterator[dict]:
+        """Stream a remote run as SSE, yielding parsed event dicts.
+
+        The blocking HTTP read runs in a worker thread and feeds an
+        ``asyncio.Queue`` so the consumer stays on the event loop.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        payload = RunRequest(
+            input=input, session_id=session_id, max_iterations=max_iterations
+        ).to_dict()
+
+        def worker() -> None:
+            try:
+                req = urllib.request.Request(
+                    self.url + "/run/stream",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    for raw in resp:
+                        line = raw.decode("utf-8").strip()
+                        if line.startswith("data:"):
+                            event = json.loads(line[len("data:") :].strip())
+                            loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as exc:  # surfaced to the consumer
+                loop.call_soon_threadsafe(queue.put_nowait, {"__error__": str(exc)})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, _STREAM_DONE)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        while True:
+            item = await queue.get()
+            if item is _STREAM_DONE:
+                break
+            if isinstance(item, dict) and "__error__" in item:
+                raise A2AError(item["__error__"])
+            yield item
 
     def as_tool(self, *, name: str | None = None, description: str | None = None) -> Tool:
         """Wrap the remote agent as a tool a local agent can call.

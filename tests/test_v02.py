@@ -46,16 +46,17 @@ class UsageToolModel(Model):
 
 
 class FailingModel(Model):
-    def __init__(self) -> None:
+    def __init__(self, exc: BaseException | None = None) -> None:
         self.calls = 0
+        self.exc = exc or ConnectionError("boom")
 
     async def generate(self, *, system, messages, tools):
         self.calls += 1
-        raise RuntimeError("boom")
+        raise self.exc
 
 
 class FlakyModel(Model):
-    """Fails `fail_times` then answers."""
+    """Fails `fail_times` with a transient error, then answers."""
 
     def __init__(self, fail_times: int, answer: str) -> None:
         self.fail_times = fail_times
@@ -65,7 +66,7 @@ class FlakyModel(Model):
     async def generate(self, *, system, messages, tools):
         self.calls += 1
         if self.calls <= self.fail_times:
-            raise RuntimeError("transient")
+            raise ConnectionError("transient")
         return ModelResponse(Message("assistant", [TextBlock(self.answer)]))
 
 
@@ -229,6 +230,16 @@ async def test_fallback_model():
     result = await agent.arun("go")
     assert result.output == "from fallback"
     assert primary.calls == 2  # original + one retry before falling back
+
+
+async def test_permanent_error_not_retried():
+    from synapse import RetryModel
+
+    primary = FailingModel(exc=ValueError("permanent bug"))
+    agent = Agent("r", model=RetryModel(primary, max_retries=3, base_delay=0))
+    with pytest.raises(ValueError):
+        await agent.arun("go")
+    assert primary.calls == 1  # not retried — a bug shouldn't be hammered
 
 
 # -- checkpointing ----------------------------------------------------------

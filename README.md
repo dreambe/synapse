@@ -2,6 +2,12 @@
 
 **A composable agent framework. Build an agent once — call it anywhere.**
 
+> ⚠️ **Status: experimental (v0.3), zero production mileage.** The core loop,
+> async concurrency, streaming, and A2A transport are solid and tested; several
+> capabilities (keyword-based memory/tool-search/routing, checkpoint-resume,
+> teams) are deliberate *first cuts*, labelled as such below. Don't ship this to
+> production yet. See [Status & honest limitations](#status--honest-limitations).
+
 synapse is a small, dependency-free Python framework for building LLM agents
 that are meant to be *invoked*, not just chatted with. The same `Agent` can be:
 
@@ -191,12 +197,13 @@ synapse card  http://localhost:8080             # fetch a remote agent card
 
 Targets are `module:attribute` or `path/to/file.py:attribute`.
 
-## Production capabilities (v0.2)
+## Capabilities
 
-These are opt-in keyword arguments on `run`/`arun` (or a `RunContext`), so the
-simple path stays simple. They map onto the canonical agentic design patterns
-while tracking where the frontier has moved (verifier loops, context
-engineering, durable execution, observability-as-infrastructure).
+The canonical configuration object is **`RunContext`**; the keyword arguments on
+`run`/`arun`/`astream` are sugar over it, so there's one option surface. They
+map onto the canonical agentic design patterns while tracking where the frontier
+has moved (streaming, verifier loops, context engineering, observability).
+Maturity is marked honestly — *solid* vs *first cut*.
 
 ```python
 result = agent.run(
@@ -211,24 +218,42 @@ result = agent.run(
 )
 ```
 
-| Capability | API | Pattern it covers |
+| Capability | API | Maturity |
 |---|---|---|
-| Observability hooks + usage | `Hooks`, `CollectingHooks`, `Usage` | Evaluation & Monitoring |
-| Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | Human-in-the-Loop |
-| Verifier loop | `verify=` → `Verdict` | Reflection + Goal Monitoring |
-| Guardrails | `input_guardrails=` / `output_guardrails=` | Guardrails / Safety |
-| Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | Memory Management |
-| Routing | `Router`, `ModelRouter` | Routing |
-| Resilience | `RetryModel(model, fallbacks=[...])` | Exception Handling & Recovery |
-| Token budgets | `token_budget=` | Resource-Aware Optimization |
-| Compaction | `Compactor` | Context engineering *(frontier)* |
-| Tool search | `Agent(tool_search=True)`, `select_tools` | Context engineering *(frontier)* |
-| Checkpoint / resume | `Checkpointer`, `run_id=` | Durable execution *(frontier)* |
-| MCP tools | `synapse.mcp.tools_from_session` | Model Context Protocol |
-| Teams + blackboard | `Team`, `Blackboard` | Multi-Agent Collaboration |
+| Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
+| Bounded tool concurrency | `max_parallel_tools=` | **solid** |
+| Wall-clock + per-tool timeouts | `timeout=`, `tool_timeout=` → `RunTimeout` | **solid** |
+| Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
+| Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | **solid** |
+| Verifier loop (iterate-until-pass) | `verify=` → `Verdict` | **solid** |
+| Guardrails | `input_guardrails=` / `output_guardrails=` | **solid** |
+| Resilience (transient vs permanent) | `RetryModel(model, fallbacks=[...], retry_on=...)` | **solid** |
+| Token budgets | `token_budget=` | **solid** |
+| MCP tools | `synapse.mcp.tools_from_session` | **solid** |
+| Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | first cut — keyword search |
+| Routing | `Router`, `ModelRouter` | first cut — `Router` keyword-based |
+| Tool search | `Agent(tool_search=True)`, `select_tools` | first cut — keyword ranking |
+| Compaction | `Compactor` | first cut — naive prefix summary |
+| Checkpoint / resume | `Checkpointer`, `run_id=` | first cut — replays tools on resume (not idempotent) |
+| Teams + blackboard | `Team`, `Blackboard` | first cut |
 
 See [`examples/advanced_agent.py`](examples/advanced_agent.py) for several of
 these together.
+
+### Streaming
+
+```python
+async for event in agent.astream("write a poem"):
+    if event.type == "text_delta":
+        print(event.text, end="", flush=True)
+    elif event.type == "run_complete":
+        print("\n--", event.result.usage.total_tokens, "tokens")
+```
+
+Streaming is the underlying execution model — `run`/`arun` consume the same
+stream to a final result, so there's one loop, not two code paths. The A2A
+server exposes it at `POST /run/stream` (SSE); the client consumes it via
+`RemoteAgent.astream(...)`.
 
 ## Architecture
 
@@ -266,6 +291,31 @@ Anthropic   Echo      Scripted
 | `synapse.team`        | `Team` + `Blackboard` multi-agent collaboration       |
 | `synapse.mcp`         | Adapter exposing MCP server tools as synapse tools    |
 | `synapse.a2a`         | Agent-to-agent protocol, stdlib + ASGI servers, client |
+
+## Status & honest limitations
+
+This is an experimental framework with a deliberate point of view, not a
+finished product. What it does **not** do yet (by design or as known debt):
+
+- **"A2A" is synapse-native, not the formal spec.** The HTTP protocol and
+  agent card here are our own (`synapse-a2a/0.1`); they are *not* wire-compatible
+  with the emerging Google A2A standard (JSON-RPC, task lifecycle). Don't expect
+  cross-vendor interop. Alignment-or-rename is on the roadmap.
+- **Checkpointing is not true durable execution.** It snapshots the message
+  transcript; resuming an interrupted run **replays tools** (not idempotent) and
+  doesn't recover a half-finished parallel tool batch atomically.
+- **The keyword heuristics are placeholders.** Memory recall, tool search, and
+  the rule-based `Router` use lexical overlap. Swap in embeddings/an LLM for
+  anything real.
+- **No distributed/observability backends.** Hooks are in-process callbacks;
+  there's no OpenTelemetry/trace export yet.
+- **Not battle-tested against a live model in CI.** The suite is fully offline
+  (fakes); it proves the plumbing, not real-model behavior (tool-call JSON
+  quirks, thinking blocks). A gated integration test is on the roadmap.
+- **The name `synapse` collides** with several projects (e.g. the Matrix
+  homeserver) and is likely taken on PyPI — a rename is an open decision.
+
+See [CHANGELOG.md](CHANGELOG.md) for what landed when.
 
 ## Development
 

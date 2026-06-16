@@ -23,7 +23,11 @@ Predicate = Callable[[str], bool]
 
 
 class Router:
-    """Routes an input to one of several agents, then runs it."""
+    """Routes an input to one of several agents, then runs it.
+
+    Predicate/keyword routing is exact and dependency-free but literal; for
+    intent-based routing use :class:`ModelRouter` (an LLM picks the agent).
+    """
 
     def __init__(self, *, default: Agent | None = None) -> None:
         self._routes: list[tuple[Predicate, Agent]] = []

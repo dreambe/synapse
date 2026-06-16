@@ -47,6 +47,14 @@ async def test_remote_agent_as_tool(served_agent):
     assert await delegate.invoke(input="add 2 and 2") == "result is 4"
 
 
+async def test_remote_streaming(served_agent):
+    client = RemoteAgent(served_agent.url)
+    events = [ev async for ev in client.astream("add 2 and 2")]
+    assert events, "expected at least one streamed event"
+    assert events[-1]["type"] == "run_complete"
+    assert events[-1]["output"] == "result is 4"
+
+
 def test_in_process_a2a_as_tool():
     # No network: one agent calls another directly via as_tool().
     specialist = Agent(

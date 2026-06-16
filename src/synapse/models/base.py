@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import AsyncIterator
 
 from ..messages import Message
 from ..observability import Usage
+from ..streaming import ModelChunk, ModelStreamEnd, TextDelta
 from ..tool import Tool
 
 
@@ -27,8 +29,10 @@ class ModelResponse:
 class Model(ABC):
     """Backend interface: turn a conversation into one assistant turn.
 
-    ``generate`` is a coroutine so many calls can be in flight concurrently —
-    the framework runs a single event loop and never blocks it on network I/O.
+    ``generate`` is the required primitive. ``stream`` yields incremental
+    chunks; the default implementation derives a (single-chunk) stream from
+    ``generate`` so every backend streams for free — override it for real
+    token-level streaming.
     """
 
     @abstractmethod
@@ -41,3 +45,21 @@ class Model(ABC):
     ) -> ModelResponse:
         """Produce the next assistant message given the conversation so far."""
         raise NotImplementedError
+
+    async def stream(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+    ) -> AsyncIterator[ModelChunk]:
+        """Yield text deltas, then a single :class:`ModelStreamEnd`.
+
+        Default: call :meth:`generate` and emit its text as one delta. Backends
+        with native streaming should override this.
+        """
+        response = await self.generate(system=system, messages=messages, tools=tools)
+        text = response.message.text
+        if text:
+            yield TextDelta(text)
+        yield ModelStreamEnd(response)

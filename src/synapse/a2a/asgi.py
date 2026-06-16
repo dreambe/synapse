@@ -19,8 +19,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from ..runtime import Session
-from .protocol import RunRequest, RunResponse
+from ..runtime import RunContext, Session
+from .protocol import RunRequest, RunResponse, run_event_to_dict
 from .server import CARD_PATH
 
 if TYPE_CHECKING:
@@ -81,6 +81,38 @@ def create_app(agent: "Agent") -> Callable[[Scope, Receive, Send], Awaitable[Non
         if method == "GET" and path == "/health":
             await _send_json(send, 200, {"status": "ok", "agent": agent.name})
             return
+        if method == "POST" and path == "/run/stream":
+            try:
+                data = json.loads(await _read_body(receive) or b"{}")
+                request = RunRequest.from_dict(data)
+            except (ValueError, KeyError) as exc:
+                await _send_json(send, 400, {"error": f"bad request: {exc}"})
+                return
+
+            session = None
+            if request.session_id is not None:
+                session = sessions.setdefault(request.session_id, Session())
+
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"text/event-stream"),
+                        (b"cache-control", b"no-cache"),
+                    ],
+                }
+            )
+            async for ev in agent.astream(
+                request.input,
+                session=session,
+                context=RunContext(max_iterations=request.max_iterations),
+            ):
+                chunk = f"data: {json.dumps(run_event_to_dict(ev))}\n\n".encode()
+                await send({"type": "http.response.body", "body": chunk, "more_body": True})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+
         if method == "POST" and path == "/run":
             try:
                 data = json.loads(await _read_body(receive) or b"{}")

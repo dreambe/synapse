@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+from ..streaming import RunComplete, TextDelta, ToolCall, ToolOutput
+
 
 @dataclass
 class AgentCard:
@@ -49,6 +51,26 @@ class RunRequest:
             session_id=data.get("session_id"),
             max_iterations=data.get("max_iterations", 12),
         )
+
+
+def run_event_to_dict(ev: object) -> dict:
+    """Serialize a streamed run event for SSE transport."""
+    if isinstance(ev, TextDelta):
+        return {"type": "text_delta", "text": ev.text}
+    if isinstance(ev, ToolCall):
+        return {"type": "tool_call", "id": ev.id, "name": ev.name, "input": ev.input}
+    if isinstance(ev, ToolOutput):
+        return {"type": "tool_output", "id": ev.id, "content": ev.content, "is_error": ev.is_error}
+    if isinstance(ev, RunComplete):
+        r = ev.result
+        return {
+            "type": "run_complete",
+            "output": r.output,
+            "agent": r.agent,
+            "iterations": r.iterations,
+            "stop_reason": r.stop_reason,
+        }
+    return {"type": "unknown"}
 
 
 @dataclass
