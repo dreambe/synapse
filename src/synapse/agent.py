@@ -110,6 +110,9 @@ class Agent:
             compactor=opts.get("compactor"),
             checkpointer=opts.get("checkpointer"),
             run_id=opts.get("run_id"),
+            output_schema=opts.get("output_schema"),
+            response_model=opts.get("response_model"),
+            validate_tool_inputs=bool(opts.get("validate_tool_inputs")),
             tool_search=(
                 self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
             ),
@@ -135,6 +138,9 @@ class Agent:
         compactor: "Compactor | None" = None,
         checkpointer: "Checkpointer | None" = None,
         run_id: str | None = None,
+        output_schema: dict | None = None,
+        response_model: type | None = None,
+        validate_tool_inputs: bool = False,
         tool_search: bool | None = None,
     ) -> RunResult:
         """Run this agent to completion (async). The canonical, typed entry point."""
@@ -154,6 +160,9 @@ class Agent:
             compactor=compactor,
             checkpointer=checkpointer,
             run_id=run_id,
+            output_schema=output_schema,
+            response_model=response_model,
+            validate_tool_inputs=validate_tool_inputs,
             tool_search=tool_search,
         )
         return await arun_agent(self, user_input, session=session, context=ctx)

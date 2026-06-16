@@ -42,6 +42,13 @@ from .messages import (
 )
 from .observability import Hooks, Usage
 from .streaming import ModelStreamEnd, RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
+from .structured import (
+    instantiate,
+    model_schema,
+    parse_output,
+    schema_instruction,
+    validate_json,
+)
 from .tool import Tool
 
 if TYPE_CHECKING:  # avoid circular imports at runtime
@@ -99,6 +106,7 @@ class RunResult:
     stop_reason: str = "end_turn"
     usage: Usage = field(default_factory=Usage)
     verify_rounds: int = 1
+    parsed: Any = None
 
 
 @dataclass
@@ -120,6 +128,9 @@ class RunContext:
     checkpointer: Optional["Checkpointer"] = None
     run_id: Optional[str] = None
     tool_search: bool = False
+    output_schema: Optional[dict] = None
+    response_model: Optional[type] = None
+    validate_tool_inputs: bool = False
     usage: Usage = field(default_factory=Usage)
 
 
@@ -242,6 +253,13 @@ async def _execute_tool_use(
     if impl is None:
         return ToolResultBlock(block.id, f"Error: no tool named {block.name!r}", is_error=True)
 
+    if ctx.validate_tool_inputs:
+        errs = validate_json(block.input, impl.parameters)
+        if errs:
+            return ToolResultBlock(
+                block.id, "Invalid tool input: " + "; ".join(errs), is_error=True
+            )
+
     if impl.requires_approval and ctx.approval is not None:
         decision = _normalize_approval(await maybe_await(ctx.approval(block.name, block.input)))
         if not decision.allow:
@@ -290,6 +308,10 @@ async def _drive_stream(
             return base_map
         return {search_tool.name: search_tool, **base_map}
 
+    system = agent.instructions
+    if ctx.output_schema:
+        system = (system + "\n\n" + schema_instruction(ctx.output_schema)).strip()
+
     iterations = 0
     for iterations in range(1, ctx.max_iterations + 1):
         if deadline is not None and loop.time() > deadline:
@@ -300,7 +322,7 @@ async def _drive_stream(
 
         response = None
         async for chunk in agent.model.stream(
-            system=agent.instructions, messages=messages, tools=exposed_tools()
+            system=system, messages=messages, tools=exposed_tools()
         ):
             if isinstance(chunk, TextDelta):
                 yield chunk
@@ -391,6 +413,8 @@ async def arun_stream(
     """Run ``agent`` and yield events as they happen, ending with
     :class:`~synapse.streaming.RunComplete`."""
     ctx = context or RunContext()
+    if ctx.response_model is not None and ctx.output_schema is None:
+        ctx.output_schema = model_schema(ctx.response_model)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ctx.timeout if ctx.timeout else None
 
@@ -425,6 +449,11 @@ async def arun_stream(
 
         output = next((m.text for m in reversed(messages) if m.role == "assistant"), "")
         output = await apply_guardrails(output, ctx.output_guardrails)
+        parsed = None
+        if ctx.output_schema:
+            parsed, _ = parse_output(output, ctx.output_schema)
+            if parsed is not None and ctx.response_model is not None:
+                parsed = instantiate(ctx.response_model, parsed)
         result = RunResult(
             output=output,
             messages=messages,
@@ -433,6 +462,7 @@ async def arun_stream(
             stop_reason=stop_reason,
             usage=ctx.usage,
             verify_rounds=rounds,
+            parsed=parsed,
         )
         await _emit(ctx, "on_run_end", result)
         yield RunComplete(result=result)

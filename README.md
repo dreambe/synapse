@@ -240,6 +240,10 @@ result = agent.run(
 
 | Capability | API | Maturity |
 |---|---|---|
+| Structured outputs | `output_schema=` / `response_model=` → `RunResult.parsed` | **solid** |
+| Tool-input validation | `validate_tool_inputs=True` | **solid** |
+| Eval harness | `Case`, `evaluate`, `contains`/`llm_judge`/… | **solid** |
+| Tracing | `TracingHooks` (in-memory), `OTelHooks` (OpenTelemetry) | **solid** |
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
 | Multimodal (images & documents, in & out) | `ImageBlock`, `DocumentBlock` | **solid** |
 | Provider-neutral backends | `AnthropicModel`, `OpenAIModel` (+ any OpenAI-compatible) | **solid** |
@@ -311,6 +315,9 @@ Anthropic  OpenAI*    Echo      Scripted
 | `synapse.registry`    | `AgentRegistry` for name-based lookup/routing         |
 | `synapse.router`      | `Router` / `ModelRouter` — pick an agent, then run it |
 | `synapse.observability` | Hooks, lifecycle events, token `Usage`              |
+| `synapse.tracing`     | `TracingHooks` (in-memory) + `OTelHooks` (OpenTelemetry) |
+| `synapse.structured`  | JSON-Schema validation + structured-output parsing    |
+| `synapse.evaluation`  | Eval harness: `Case` / `evaluate` / checks / `llm_judge` |
 | `synapse.skill`       | Skills: `SKILL.md` folders, progressive disclosure    |
 | `synapse.memory`      | Cross-run `Memory` backends + auto memory tools       |
 | `synapse.guardrails`  | Input/output guardrails                               |
@@ -333,9 +340,10 @@ finished product. What it does **not** do yet (by design or as known debt):
   anything real.
 - **No distributed/observability backends.** Hooks are in-process callbacks;
   there's no OpenTelemetry/trace export yet.
-- **Not battle-tested against a live model in CI.** The suite is fully offline
-  (fakes); it proves the plumbing, not real-model behavior (tool-call JSON
-  quirks, thinking blocks). A gated integration test is on the roadmap.
+- **Live-model testing is opt-in, not continuous.** The default suite is fully
+  offline (fakes). Gated integration tests (`pytest -m integration`) exercise a
+  real model, but only run when `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` secrets
+  are configured — so day-to-day CI proves the plumbing, not a live model.
 - **A2A push notifications** are HMAC-signed (`X-A2A-Signature`, verifiable via
   `synapse.a2a.push.verify_signature`) and retried with backoff, but delivery is
   still in-process (no durable outbox/queue across restarts yet).

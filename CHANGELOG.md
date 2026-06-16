@@ -9,6 +9,19 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Structured outputs.** Give a run an `output_schema` (JSON Schema) or a
+  `response_model` (Pydantic); the schema is described to the model and the
+  final answer is parsed + validated into `RunResult.parsed` (provider-neutral,
+  composes with `verify=`). Plus opt-in `validate_tool_inputs=` — a malformed
+  tool call is returned to the model as a correctable error instead of raising.
+- **Eval harness.** `Case` / `evaluate` / `aevaluate` / `Report` with checks
+  (`contains`, `equals`, `matches`, arbitrary predicates, and `llm_judge`
+  against a rubric) so agent behavior is measurable and changes are verifiable.
+- **Tracing.** `TracingHooks` (in-memory spans, dependency-free) and `OTelHooks`
+  (OpenTelemetry, `[otel]` extra) built on the lifecycle hooks.
+- **Typed package + live tests.** Ships a `py.typed` marker; gated live-model
+  integration tests (`pytest -m integration`, self-skipping without keys) plus a
+  CI job that runs them when API-key secrets are present.
 - **Skills (progressive disclosure).** A skill is a folder (`SKILL.md` front
   matter + instructions + optional bundled files). `load_skills(dir)` /
   `Skill.from_directory` discover them; `Agent(skills=...)` puts each skill's

@@ -30,6 +30,17 @@ from .errors import (
     SynapseError,
     ToolError,
 )
+from .evaluation import (
+    Case,
+    CaseResult,
+    Report,
+    aevaluate,
+    contains,
+    equals,
+    evaluate,
+    llm_judge,
+    matches,
+)
 from .guardrails import (
     Guardrail,
     GuardrailViolation,
@@ -77,8 +88,10 @@ from .runtime import (
 )
 from .skill import Skill, load_skills, skill_tools
 from .streaming import RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
+from .structured import parse_output, validate_json
 from .team import Blackboard, Team
 from .tool import Tool, tool
+from .tracing import OTelHooks, Span, TracingHooks
 
 __version__ = "0.3.0"
 
@@ -142,6 +155,23 @@ __all__ = [
     "Skill",
     "load_skills",
     "skill_tools",
+    # structured outputs
+    "parse_output",
+    "validate_json",
+    # evaluation
+    "Case",
+    "CaseResult",
+    "Report",
+    "evaluate",
+    "aevaluate",
+    "contains",
+    "equals",
+    "matches",
+    "llm_judge",
+    # tracing
+    "TracingHooks",
+    "OTelHooks",
+    "Span",
     # context engineering
     "Compactor",
     "select_tools",

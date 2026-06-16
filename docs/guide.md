@@ -24,6 +24,39 @@ def deploy(service: str) -> str:
     ...
 ```
 
+## Structured outputs
+
+Get typed, validated results — not just free text — so an agent can feed
+downstream systems.
+
+```python
+schema = {
+    "type": "object",
+    "properties": {"city": {"type": "string"}, "country": {"type": "string"}},
+    "required": ["city", "country"],
+}
+result = agent.run("The capital of France.", output_schema=schema)
+result.parsed     # {"city": "Paris", "country": "France"}  (None if invalid)
+
+# Or a Pydantic model — result.parsed is an instance:
+from pydantic import BaseModel
+class Place(BaseModel):
+    city: str
+    country: str
+result = agent.run("...", response_model=Place)
+```
+
+The schema is described to the model and the final answer is parsed +
+validated (provider-neutral). Combine with `verify=` to iterate until valid.
+
+**Tool-input validation** — validate a tool call's arguments against the tool's
+own schema before executing, so a malformed call is returned to the model as a
+correctable error instead of raising:
+
+```python
+agent.run("...", validate_tool_inputs=True)
+```
+
 ## Multimodal (images & documents)
 
 Pass images and documents (PDF, text) as input, and let tools return them.
@@ -123,6 +156,38 @@ class MyHooks(Hooks):
 
 Events: `on_run_start`, `on_model_response`, `on_tool_start`, `on_tool_end`,
 `on_turn_end`, `on_run_end`. Sync or async methods both work.
+
+### Tracing
+
+`TracingHooks` records in-memory spans (run + each tool) with no dependency;
+`OTelHooks` emits OpenTelemetry spans (`pip install synapse[otel]`).
+
+```python
+from synapse import TracingHooks
+tracer = TracingHooks()
+agent.run("...", hooks=tracer)
+for span in tracer.spans:
+    print(span.name, span.duration, span.attributes)
+```
+
+## Evaluation
+
+Measure agent behavior so changes are verifiable.
+
+```python
+from synapse import Case, evaluate, contains, llm_judge
+
+report = evaluate(agent, [
+    Case("2 + 2?", check=contains("4")),
+    Case("capital of France?", expect_contains="Paris"),
+    Case("explain recursion", check=llm_judge(judge_model, "Mentions a base case.")),
+])
+print(report.summary())          # per-case PASS/FAIL + pass-rate + tokens
+assert report.pass_rate >= 0.9
+```
+
+Checks: `contains` / `equals` / `matches`, any predicate `(RunResult) -> bool |
+(bool, detail)`, or `llm_judge(model, rubric)` (PASS/FAIL). Checks may be async.
 
 ## Human-in-the-loop (approval)
 
