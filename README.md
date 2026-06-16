@@ -323,8 +323,9 @@ finished product. What it does **not** do yet (by design or as known debt):
 - **Not battle-tested against a live model in CI.** The suite is fully offline
   (fakes); it proves the plumbing, not real-model behavior (tool-call JSON
   quirks, thinking blocks). A gated integration test is on the roadmap.
-- **A2A push notifications are best-effort.** The webhook fires fire-and-forget
-  on terminal state; there's no retry/signing yet.
+- **A2A push notifications** are HMAC-signed (`X-A2A-Signature`, verifiable via
+  `synapse.a2a.push.verify_signature`) and retried with backoff, but delivery is
+  still in-process (no durable outbox/queue across restarts yet).
 
 See [CHANGELOG.md](CHANGELOG.md) for what landed when.
 

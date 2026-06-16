@@ -17,7 +17,9 @@ real frontier gaps, govern concurrency, and stop overselling.
   the compliant `create_a2a_app` server (card at `/.well-known/agent-card.json`),
   and an `A2AClient` that talks to *any* A2A agent. **Surpass:** `A2AClient.as_tool()`
   wraps a standards-compliant remote agent as a synapse tool (cross-ecosystem
-  delegation), plus best-effort push-notification webhooks. The earlier
+  delegation), plus **signed, retrying push-notification webhooks**
+  (`synapse.a2a.push`: HMAC-SHA256 over `timestamp + "." + body` with replay
+  protection via `verify_signature`, exponential-backoff retries). The earlier
   synapse-native `/run` server is kept as a labelled convenience layer.
 - **Streaming as the execution primitive.** `Model.stream()` (native token
   streaming in the Anthropic backend; a single-chunk default for every other

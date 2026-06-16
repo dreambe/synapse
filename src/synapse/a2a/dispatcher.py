@@ -228,29 +228,14 @@ class A2ADispatcher:
         return {"taskId": task_id, "pushNotificationConfig": config}
 
     async def _maybe_push(self, task: Task) -> None:
-        """Fire a best-effort webhook for a terminal task (surpasses baseline)."""
+        """Fire a signed, retrying webhook for a terminal task (surpasses the
+        fire-and-forget baseline)."""
         config = self._push_configs.get(task.id)
         if not config or task.status.state not in TERMINAL_STATES:
             return
-        url = config.get("url")
-        if not url:
-            return
-        import json
-        import urllib.request
+        from . import push
 
-        def _post() -> None:
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(task.to_dict()).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                urllib.request.urlopen(req, timeout=10).close()
-            except Exception:  # best-effort notification
-                pass
-
-        await asyncio.to_thread(_post)
+        await asyncio.to_thread(push.deliver, config, task.to_dict())
 
 
 def _artifact_chunk(task_id: str, context_id: str, text: str) -> dict:
