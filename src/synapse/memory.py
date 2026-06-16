@@ -8,11 +8,14 @@ frontier file-/store-based memory works.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .tool import Tool
 
@@ -94,6 +97,106 @@ class FileMemory(Memory):
 
     async def all(self) -> list[str]:
         return [it.text for it in self._read()]
+
+
+class Embedder(ABC):
+    """Turns text into vectors. Implement over any embedding model."""
+
+    @abstractmethod
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class HashingEmbedder(Embedder):
+    """A dependency-free hashing bag-of-words embedder.
+
+    Deterministic and offline — token-overlap in vector space, a step up from
+    raw substring search and a stand-in for tests/defaults. For genuine
+    semantic recall use :class:`OpenAIEmbedder` (or your own ``Embedder``).
+    """
+
+    def __init__(self, dim: int = 256) -> None:
+        self.dim = dim
+
+    def _vec(self, text: str) -> list[float]:
+        v = [0.0] * self.dim
+        for token in text.lower().split():
+            h = int(hashlib.md5(token.encode()).hexdigest(), 16)  # noqa: S324 - not security
+            v[h % self.dim] += 1.0
+        norm = math.sqrt(sum(x * x for x in v))
+        return [x / norm for x in v] if norm else v
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self._vec(t) for t in texts]
+
+
+class OpenAIEmbedder(Embedder):
+    """Embeddings via an OpenAI-compatible endpoint (optional ``[openai]``)."""
+
+    def __init__(
+        self,
+        model: str = "text-embedding-3-small",
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        client: Any | None = None,
+    ) -> None:
+        self.model = model
+        self._client = client
+        self._base_url = base_url
+        self._api_key = api_key
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            import openai
+
+            kwargs: dict[str, Any] = {}
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            if self._api_key:
+                kwargs["api_key"] = self._api_key
+            self._client = openai.AsyncOpenAI(**kwargs)
+        return self._client
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        resp = await self._get_client().embeddings.create(model=self.model, input=texts)
+        return [d.embedding for d in resp.data]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+@dataclass
+class _VectorItem:
+    text: str
+    vector: list[float]
+    meta: dict = field(default_factory=dict)
+
+
+class VectorMemory(Memory):
+    """Semantic memory backed by a pluggable :class:`Embedder` (cosine search)."""
+
+    def __init__(self, embedder: Embedder, *, min_score: float = 0.0) -> None:
+        self.embedder = embedder
+        self.min_score = min_score
+        self._items: list[_VectorItem] = []
+
+    async def add(self, text: str, **meta: object) -> None:
+        vector = (await self.embedder.embed([text]))[0]
+        self._items.append(_VectorItem(text=text, vector=vector, meta=dict(meta)))
+
+    async def search(self, query: str, k: int = 5) -> list[str]:
+        if not self._items:
+            return []
+        qv = (await self.embedder.embed([query]))[0]
+        scored = sorted(self._items, key=lambda it: _cosine(qv, it.vector), reverse=True)
+        return [it.text for it in scored[:k] if _cosine(qv, it.vector) > self.min_score]
+
+    async def all(self) -> list[str]:
+        return [it.text for it in self._items]
 
 
 def memory_tools(memory: Memory) -> list[Tool]:

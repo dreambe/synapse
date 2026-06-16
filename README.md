@@ -259,7 +259,9 @@ result = agent.run(
 | MCP tools | `synapse.mcp.tools_from_session` | **solid** |
 | A2A protocol v0.3.0 (JSON-RPC, tasks, SSE) | `create_a2a_app`, `A2AClient` | **solid** |
 | Skills (progressive disclosure) | `Skill`, `load_skills`, `Agent(skills=...)` | **solid** |
-| Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | first cut — keyword search |
+| Cross-run memory | `Agent(memory=...)`: `InMemoryMemory`/`FileMemory` (keyword), `VectorMemory` (semantic) | **solid** |
+| Code execution sandbox | `code_execution_tool()`, `run_python()` (process isolation) | **solid** |
+| A2A task persistence | `A2ADispatcher(task_store=FileTaskStore(...))` | **solid** |
 | Routing | `Router`, `ModelRouter` | first cut — `Router` keyword-based |
 | Tool search | `Agent(tool_search=True)`, `select_tools` | first cut — keyword ranking |
 | Compaction | `Compactor` | first cut — naive prefix summary |
@@ -320,6 +322,7 @@ Anthropic  OpenAI*    Echo      Scripted
 | `synapse.structured`  | JSON-Schema validation + structured-output parsing    |
 | `synapse.evaluation`  | Eval harness: `Case` / `evaluate` / checks / `llm_judge` |
 | `synapse.skill`       | Skills: `SKILL.md` folders, progressive disclosure    |
+| `synapse.sandbox`     | Code execution in a resource-limited subprocess       |
 | `synapse.memory`      | Cross-run `Memory` backends + auto memory tools       |
 | `synapse.guardrails`  | Input/output guardrails                               |
 | `synapse.context`     | `Compactor` and tool selection (context engineering)  |
@@ -336,9 +339,13 @@ finished product. What it does **not** do yet (by design or as known debt):
 - **Checkpointing is not true durable execution.** It snapshots the message
   transcript; resuming an interrupted run **replays tools** (not idempotent) and
   doesn't recover a half-finished parallel tool batch atomically.
-- **The keyword heuristics are placeholders.** Memory recall, tool search, and
-  the rule-based `Router` use lexical overlap. Swap in embeddings/an LLM for
-  anything real.
+- **Some defaults are lexical, not semantic.** Tool search and the rule-based
+  `Router` use keyword overlap (swap in an LLM/embeddings for nuance). Memory
+  now has a semantic option (`VectorMemory` + an `Embedder`); the in-memory/file
+  stores remain keyword-based.
+- **The code sandbox is process isolation, not a security boundary.** Resource
+  limits + timeout + a clean subprocess — but no syscall filtering or network
+  isolation. Run untrusted code in a container/gVisor/VM.
 - **No distributed/observability backends.** Hooks are in-process callbacks;
   there's no OpenTelemetry/trace export yet.
 - **Live-model testing is opt-in, not continuous.** The default suite is fully

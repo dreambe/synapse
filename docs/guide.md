@@ -131,8 +131,9 @@ from synapse import RetryModel
 model = RetryModel(OpenAIModel("gpt-4o"), fallbacks=[AnthropicModel("claude-opus-4-8")])
 ```
 
-To support a provider with no OpenAI-compatible endpoint, implement the
-`Model` interface (`async def generate`, optional `stream`).
+Both backends stream natively at the token level (`agent.astream(...)` /
+`Model.stream`). To support a provider with no OpenAI-compatible endpoint,
+implement the `Model` interface (`async def generate`, optional `stream`).
 
 ## RunContext
 
@@ -299,8 +300,31 @@ from synapse import Agent, InMemoryMemory, FileMemory
 agent = Agent("assistant", memory=FileMemory("memory.jsonl"))
 ```
 
-> First cut: recall is keyword/lexical. Implement the `Memory` ABC over an
-> embedding store for semantic recall.
+`InMemoryMemory` / `FileMemory` use keyword search. For **semantic recall**, use
+`VectorMemory` with an embedder (cosine similarity):
+
+```python
+from synapse import VectorMemory, OpenAIEmbedder, HashingEmbedder
+agent = Agent("assistant", memory=VectorMemory(OpenAIEmbedder()))   # semantic
+agent = Agent("assistant", memory=VectorMemory(HashingEmbedder()))  # offline, dep-free
+```
+
+Implement the `Embedder` interface to plug in any embedding model.
+
+## Code execution
+
+Give an agent a sandboxed Python tool:
+
+```python
+from synapse import Agent, code_execution_tool
+agent = Agent("coder", tools=[code_execution_tool(timeout=10, memory_mb=512)])
+```
+
+It runs each snippet in an isolated subprocess (fresh temp dir, minimal env,
+CPU/memory/output limits, hard timeout). **Honest scope:** this is process
+isolation, *not* a security boundary against adversarial code — no syscall
+filtering or network isolation. For untrusted code, run inside a container /
+gVisor / firejail / VM. Use `run_python(code, ...)` directly for the raw result.
 
 ## Context compaction
 

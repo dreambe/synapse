@@ -112,7 +112,8 @@ async def test_openai_model_generate_with_fake_client():
     class FakeCompletions:
         async def create(self, **kwargs):
             captured.update(kwargs)
-            return _Resp(_Msg(content="42"), _Usage(3, 1))
+            # The agent loop drives via stream(); return a streamed reply.
+            return _AsyncIter([_StreamChunk([_Delta(content="42")]), _StreamChunk([], usage=_Usage(3, 1))])
 
     class FakeChat:
         completions = FakeCompletions()
@@ -128,6 +129,96 @@ async def test_openai_model_generate_with_fake_client():
     assert captured["messages"][-1] == {"role": "user", "content": "2+2?"}
 
 
+class _Delta:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _StreamChunk:
+    def __init__(self, choices=None, usage=None):
+        self.choices = [type("Ch", (), {"delta": d})() for d in (choices or [])]
+        self.usage = usage
+
+
+class _ToolCallDelta:
+    def __init__(self, index, id=None, name=None, args=None):
+        self.index = index
+        self.id = id
+        self.function = _Fn(name, args) if (name or args) else None
+
+
+class _AsyncIter:
+    def __init__(self, items):
+        self._items = items
+
+    def __aiter__(self):
+        self._i = 0
+        return self
+
+    async def __anext__(self):
+        if self._i >= len(self._items):
+            raise StopAsyncIteration
+        item = self._items[self._i]
+        self._i += 1
+        return item
+
+
+def _streaming_client(chunks):
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            assert kwargs.get("stream") is True
+            return _AsyncIter(chunks)
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    return FakeClient()
+
+
+async def test_stream_text_deltas_and_final():
+    from synapse.messages import Message
+    from synapse.streaming import ModelStreamEnd, TextDelta
+
+    chunks = [
+        _StreamChunk([_Delta(content="Hel")]),
+        _StreamChunk([_Delta(content="lo")]),
+        _StreamChunk([], usage=_Usage(5, 2)),
+    ]
+    model = OpenAIModel("gpt-4o", client=_streaming_client(chunks))
+    events = [
+        ev async for ev in model.stream(system="", messages=[Message("user", "hi")], tools=[])
+    ]
+    deltas = [e.text for e in events if isinstance(e, TextDelta)]
+    assert "".join(deltas) == "Hello"
+    end = events[-1]
+    assert isinstance(end, ModelStreamEnd)
+    assert end.response.message.text == "Hello"
+    assert end.response.usage.input_tokens == 5 and end.response.usage.output_tokens == 2
+
+
+async def test_stream_accumulates_tool_calls():
+    from synapse.messages import Message
+    from synapse.streaming import ModelStreamEnd
+
+    chunks = [
+        _StreamChunk([_Delta(tool_calls=[_ToolCallDelta(0, id="c1", name="add", args='{"a":')])]),
+        _StreamChunk([_Delta(tool_calls=[_ToolCallDelta(0, args="1}")])]),
+    ]
+    model = OpenAIModel("gpt-4o", client=_streaming_client(chunks))
+    events = [
+        ev async for ev in model.stream(system="", messages=[Message("user", "go")], tools=[])
+    ]
+    end = events[-1]
+    assert isinstance(end, ModelStreamEnd)
+    assert end.response.stop_reason == "tool_use"
+    tu = end.response.message.tool_uses[0]
+    assert tu.name == "add" and tu.input == {"a": 1}
+
+
 async def test_openai_model_tool_loop():
     # Two responses: a tool call, then a final answer.
     class FakeCompletions:
@@ -137,8 +228,10 @@ async def test_openai_model_tool_loop():
         async def create(self, **kwargs):
             self.n += 1
             if self.n == 1:
-                return _Resp(_Msg(tool_calls=[_ToolCall("c1", "add", '{"a": 2, "b": 2}')]))
-            return _Resp(_Msg(content="the sum is 4"))
+                return _AsyncIter(
+                    [_StreamChunk([_Delta(tool_calls=[_ToolCallDelta(0, "c1", "add", '{"a": 2, "b": 2}')])])]
+                )
+            return _AsyncIter([_StreamChunk([_Delta(content="the sum is 4")])])
 
     class FakeChat:
         completions = FakeCompletions()

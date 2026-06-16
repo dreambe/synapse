@@ -18,7 +18,7 @@ support is provider-specific.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 from ..errors import ModelError
 from ..messages import (
@@ -30,6 +30,7 @@ from ..messages import (
     ToolUseBlock,
 )
 from ..observability import Usage
+from ..streaming import ModelChunk, ModelStreamEnd, TextDelta
 from ..tool import Tool
 from .base import Model, ModelResponse
 
@@ -184,3 +185,68 @@ class OpenAIModel(Model):
         except Exception as exc:  # pragma: no cover - network/runtime
             raise ModelError(f"OpenAI-compatible request failed: {exc}") from exc
         return from_openai_response(resp)
+
+    async def stream(self, *, system, messages, tools) -> AsyncIterator[ModelChunk]:
+        client = self._get_client()
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": to_openai_messages(system, messages),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            payload["tools"] = to_openai_tools(tools)
+        try:
+            resp = await client.chat.completions.create(**payload)
+        except Exception as exc:  # pragma: no cover - network/runtime
+            raise ModelError(f"OpenAI-compatible stream failed: {exc}") from exc
+
+        text_parts: list[str] = []
+        tool_calls: dict[int, dict] = {}
+        usage = None
+        async for chunk in resp:
+            if getattr(chunk, "usage", None) is not None:
+                usage = chunk.usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                text_parts.append(content)
+                yield TextDelta(content)
+            for tc in getattr(delta, "tool_calls", None) or []:
+                slot = tool_calls.setdefault(tc.index, {"id": None, "name": None, "args": ""})
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["args"] += fn.arguments
+
+        content_blocks: list = []
+        text = "".join(text_parts)
+        if text:
+            content_blocks.append(TextBlock(text))
+        for idx in sorted(tool_calls):
+            slot = tool_calls[idx]
+            try:
+                args = json.loads(slot["args"] or "{}")
+            except (ValueError, TypeError):
+                args = {}
+            content_blocks.append(
+                ToolUseBlock(id=slot["id"] or f"call_{idx}", name=slot["name"] or "", input=args)
+            )
+        stop = "tool_use" if tool_calls else "end_turn"
+        out_usage = None
+        if usage is not None:
+            out_usage = Usage(
+                input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            )
+        yield ModelStreamEnd(
+            ModelResponse(Message("assistant", content_blocks), stop_reason=stop, usage=out_usage)
+        )

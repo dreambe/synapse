@@ -16,6 +16,7 @@ from __future__ import annotations
 from .asgi import create_a2a_app, create_app
 from .client import A2AClient, RemoteAgent, fetch_card
 from .dispatcher import A2ADispatcher
+from .store import FileTaskStore, InMemoryTaskStore, TaskStore
 from .protocol import AgentCard, RunRequest, RunResponse
 from .server import AgentServer, serve
 from .spec import (
@@ -32,6 +33,9 @@ __all__ = [
     # A2A-compliant
     "create_a2a_app",
     "A2ADispatcher",
+    "TaskStore",
+    "InMemoryTaskStore",
+    "FileTaskStore",
     "A2AClient",
     "A2AAgentCard",
     "Message",

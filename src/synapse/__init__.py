@@ -49,7 +49,16 @@ from .guardrails import (
     max_length,
     redact,
 )
-from .memory import FileMemory, InMemoryMemory, Memory, memory_tools
+from .memory import (
+    Embedder,
+    FileMemory,
+    HashingEmbedder,
+    InMemoryMemory,
+    Memory,
+    OpenAIEmbedder,
+    VectorMemory,
+    memory_tools,
+)
 from .messages import (
     DocumentBlock,
     ImageBlock,
@@ -75,6 +84,7 @@ from .observability import (
 )
 from .registry import AgentRegistry
 from .router import ModelRouter, Router
+from .sandbox import SandboxResult, code_execution_tool, run_python
 from .runtime import (
     ApprovalDecision,
     RunContext,
@@ -137,7 +147,15 @@ __all__ = [
     "Memory",
     "InMemoryMemory",
     "FileMemory",
+    "VectorMemory",
+    "Embedder",
+    "HashingEmbedder",
+    "OpenAIEmbedder",
     "memory_tools",
+    # sandbox
+    "run_python",
+    "code_execution_tool",
+    "SandboxResult",
     # guardrails
     "Guardrail",
     "GuardrailViolation",

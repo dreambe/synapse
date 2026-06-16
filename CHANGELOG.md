@@ -9,6 +9,16 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Code execution sandbox.** `code_execution_tool()` / `run_python()` run code
+  in an isolated subprocess (fresh temp dir, minimal env, POSIX CPU/memory/output
+  limits, hard timeout). Explicitly process isolation, **not** a security
+  boundary against adversarial code (no syscall/network isolation) — documented.
+- **Semantic memory.** `VectorMemory` with a pluggable `Embedder` (cosine
+  search); `HashingEmbedder` (offline, dep-free) and `OpenAIEmbedder` (`[openai]`).
+- **Native OpenAI streaming.** `OpenAIModel.stream` now streams tokens (and
+  accumulates streamed tool calls) instead of returning a single chunk.
+- **A2A task persistence.** Pluggable `TaskStore` — `InMemoryTaskStore`
+  (default) and `FileTaskStore` (survives restarts); `A2ADispatcher(task_store=)`.
 - **Loop control (loop engineering).** Stopping guards beyond the iteration cap:
   `max_repeated_tool_calls` (loop detection — same call recurring across turns →
   `loop_detected`), `max_consecutive_tool_errors` (circuit breaker →

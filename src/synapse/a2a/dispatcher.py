@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 from ..messages import DocumentBlock, ImageBlock, TextBlock
 from ..streaming import RunComplete, TextDelta
 from . import jsonrpc
+from .store import InMemoryTaskStore, TaskStore
 from .spec import (
     TERMINAL_STATES,
     AgentCapabilities,
@@ -42,9 +43,9 @@ if TYPE_CHECKING:
 class A2ADispatcher:
     """Serves one synapse :class:`~synapse.agent.Agent` over the A2A protocol."""
 
-    def __init__(self, agent: "Agent") -> None:
+    def __init__(self, agent: "Agent", *, task_store: "TaskStore | None" = None) -> None:
         self.agent = agent
-        self._tasks: dict[str, Task] = {}
+        self._tasks: TaskStore = task_store or InMemoryTaskStore()
         self._canceled: set[str] = set()
         self._push_configs: dict[str, dict] = {}
 
@@ -77,9 +78,9 @@ class A2ADispatcher:
             if method == "message/send":
                 result = await self._message_send(params)
             elif method == "tasks/get":
-                result = self._tasks_get(params).to_dict()
+                result = await self._tasks_get(params)
             elif method == "tasks/cancel":
-                result = self._tasks_cancel(params).to_dict()
+                result = await self._tasks_cancel(params)
             elif method == "tasks/pushNotificationConfig/set":
                 result = self._push_set(params)
             elif method == "tasks/pushNotificationConfig/get":
@@ -108,13 +109,13 @@ class A2ADispatcher:
             return
 
         if method == "tasks/resubscribe":
-            task = self._tasks.get(params.get("id", ""))
+            task = await self._tasks.get(params.get("id", ""))
             if task is None:
                 yield jsonrpc.error(
                     request_id, jsonrpc.JSONRPCError(jsonrpc.TASK_NOT_FOUND, "task not found")
                 )
             else:
-                yield jsonrpc.success(request_id, task.to_dict())
+                yield jsonrpc.success(request_id, task)
             return
 
         if method != "message/stream":
@@ -179,7 +180,7 @@ class A2ADispatcher:
             history=[msg, answer],
             metadata=_run_metadata(result),
         )
-        self._tasks[task_id] = task
+        await self._tasks.put(task_id, task.to_dict())
         await self._maybe_push(task)
         return task.to_dict()
 
@@ -190,7 +191,7 @@ class A2ADispatcher:
         submitted = Task(
             id=task_id, context_id=context_id, status=TaskStatus(state=TaskState.SUBMITTED)
         )
-        self._tasks[task_id] = submitted
+        await self._tasks.put(task_id, submitted.to_dict())
         yield jsonrpc.success(request_id, submitted.to_dict())
         yield jsonrpc.success(
             request_id,
@@ -213,34 +214,36 @@ class A2ADispatcher:
         final_state = TaskState.CANCELED if task_id in self._canceled else TaskState.COMPLETED
         answer = Message.agent_text(output, task_id=task_id, context_id=context_id)
         final_status = TaskStatus(state=final_state, message=answer)
-        self._tasks[task_id] = Task(
+        final_task = Task(
             id=task_id,
             context_id=context_id,
             status=final_status,
             artifacts=[Artifact(parts=[TextPart(output)], name="response")],
             metadata=_run_metadata(run_result) if run_result is not None else None,
         )
+        await self._tasks.put(task_id, final_task.to_dict())
         yield jsonrpc.success(
             request_id,
             TaskStatusUpdateEvent(task_id, context_id, final_status, final=True).to_dict(),
         )
-        await self._maybe_push(self._tasks[task_id])
+        await self._maybe_push(final_task)
 
-    def _tasks_get(self, params: dict) -> Task:
-        task = self._tasks.get(params.get("id", ""))
+    async def _tasks_get(self, params: dict) -> dict:
+        task = await self._tasks.get(params.get("id", ""))
         if task is None:
             raise jsonrpc.JSONRPCError(jsonrpc.TASK_NOT_FOUND, "task not found")
         return task
 
-    def _tasks_cancel(self, params: dict) -> Task:
+    async def _tasks_cancel(self, params: dict) -> dict:
         task_id = params.get("id", "")
-        task = self._tasks.get(task_id)
+        task = await self._tasks.get(task_id)
         if task is None:
             raise jsonrpc.JSONRPCError(jsonrpc.TASK_NOT_FOUND, "task not found")
-        if task.status.state in TERMINAL_STATES:
+        if task.get("status", {}).get("state") in TERMINAL_STATES:
             raise jsonrpc.JSONRPCError(jsonrpc.TASK_NOT_CANCELABLE, "task is not cancelable")
         self._canceled.add(task_id)
-        task.status = TaskStatus(state=TaskState.CANCELED)
+        task["status"] = TaskStatus(state=TaskState.CANCELED).to_dict()
+        await self._tasks.put(task_id, task)
         return task
 
     def _push_set(self, params: dict) -> dict:

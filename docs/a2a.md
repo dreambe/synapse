@@ -82,6 +82,19 @@ Headers sent: `X-A2A-Signature` (`sha256=…` HMAC over `timestamp + "." + body`
 
 > Limitation: delivery is in-process (no durable outbox across restarts yet).
 
+## Task persistence
+
+By default tasks live in memory (lost on restart). Pass a `task_store` to
+persist them — `FileTaskStore` survives restarts, or implement `TaskStore`:
+
+```python
+from synapse.a2a import A2ADispatcher, FileTaskStore
+dispatcher = A2ADispatcher(agent, task_store=FileTaskStore("tasks"))
+```
+
+`create_a2a_app(agent)` uses an in-memory store; build the app around your own
+dispatcher to swap in persistence.
+
 ## synapse-native convenience layer
 
 For quick local/dev use there's also a lightweight `/run` + `/run/stream`
