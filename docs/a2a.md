@@ -25,8 +25,7 @@ JSON-RPC methods: `message/send`, `message/stream` (SSE), `tasks/get`,
 `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`+`get`.
 
 Tasks carry the real lifecycle (`submitted → working → completed / canceled /
-failed / …`), with `artifacts`, optional `history`, and `metadata` (usage +
-cost — see [Cost](cost.md)).
+failed / …`), with `artifacts`, optional `history`, and `metadata` (token usage).
 
 ## Consume any A2A agent
 

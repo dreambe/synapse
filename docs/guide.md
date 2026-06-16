@@ -24,6 +24,31 @@ def deploy(service: str) -> str:
     ...
 ```
 
+## Multimodal (images)
+
+Pass images in as input, and let tools return them.
+
+```python
+from synapse import ImageBlock, TextBlock
+
+# Image input — pass a list of content blocks instead of a string:
+agent.run([
+    TextBlock("What's in this image?"),
+    ImageBlock.from_file("photo.png"),            # or .from_base64(data, "image/png")
+])                                                # or .from_url("https://…/cat.png")
+
+# A tool can return an image (or a list of text + images):
+@tool
+def render_chart(spec: str) -> ImageBlock:
+    "Render a chart and return it as a PNG."
+    return ImageBlock.from_base64(png_b64, "image/png")
+```
+
+Images serialize to the model's native image content blocks. Over A2A, an image
+`FilePart` (bytes or URI) in an incoming message maps to image input
+automatically. (Input guardrails apply to string input; for block-list input
+they're skipped.)
+
 ## RunContext
 
 `RunContext` is the **canonical configuration object**; the keyword arguments on
@@ -51,7 +76,6 @@ agent.run("...", max_iterations=8, token_budget=200_000, timeout=60)
 | `input_guardrails` / `output_guardrails` | Validate/transform text. |
 | `compactor` | Summarize old turns when history grows (see Context). |
 | `checkpointer` + `run_id` | Persist/resume run state. |
-| `pricing` | Override the cost price table. |
 | `tool_search` | Expose a `search_tools` meta-tool, load schemas on demand. |
 
 ## Observability & hooks
@@ -176,4 +200,4 @@ agent.run("step 2", checkpointer=cp, run_id="job-42")
 
 > First cut: snapshots the transcript; resuming replays tools (not idempotent).
 
-See also: [Cost accounting](cost.md) and [A2A](a2a.md).
+See also: [A2A](a2a.md).

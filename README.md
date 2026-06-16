@@ -54,8 +54,7 @@ Requires Python 3.10+.
 ## Documentation
 
 Full guides live in [`docs/`](docs/index.md): [getting started](docs/getting-started.md) ·
-[guide](docs/guide.md) (all run options) · [cost accounting](docs/cost.md) ·
-[agent-to-agent](docs/a2a.md).
+[guide](docs/guide.md) (all run options) · [agent-to-agent](docs/a2a.md).
 
 ## Quick start
 
@@ -241,6 +240,7 @@ result = agent.run(
 | Capability | API | Maturity |
 |---|---|---|
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
+| Multimodal (images in input & tool results) | `ImageBlock`, list-of-blocks input | **solid** |
 | Bounded tool concurrency | `max_parallel_tools=` | **solid** |
 | Wall-clock + per-tool timeouts | `timeout=`, `tool_timeout=` → `RunTimeout` | **solid** |
 | Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
@@ -251,7 +251,6 @@ result = agent.run(
 | Token budgets | `token_budget=` | **solid** |
 | MCP tools | `synapse.mcp.tools_from_session` | **solid** |
 | A2A protocol v0.3.0 (JSON-RPC, tasks, SSE) | `create_a2a_app`, `A2AClient` | **solid** |
-| Cost accounting (tokens → money) | `RunResult.cost`, `CostTracker`, `estimate_cost` | **solid** |
 | Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | first cut — keyword search |
 | Routing | `Router`, `ModelRouter` | first cut — `Router` keyword-based |
 | Tool search | `Agent(tool_search=True)`, `select_tools` | first cut — keyword ranking |

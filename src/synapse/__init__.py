@@ -22,7 +22,6 @@ from __future__ import annotations
 from .agent import Agent
 from .checkpoint import Checkpointer, FileCheckpointer, InMemoryCheckpointer
 from .context import Compactor, select_tools
-from .cost import PRICES, Cost, CostTracker, ModelPrice, estimate_cost
 from .errors import (
     A2AError,
     ConfigurationError,
@@ -40,7 +39,7 @@ from .guardrails import (
     redact,
 )
 from .memory import FileMemory, InMemoryMemory, Memory, memory_tools
-from .messages import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from .messages import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
 from .models import (
     AnthropicModel,
     EchoModel,
@@ -82,6 +81,7 @@ __all__ = [
     "tool",
     "Message",
     "TextBlock",
+    "ImageBlock",
     "ToolUseBlock",
     "ToolResultBlock",
     "RunResult",
@@ -130,12 +130,6 @@ __all__ = [
     # context engineering
     "Compactor",
     "select_tools",
-    # cost
-    "Cost",
-    "CostTracker",
-    "ModelPrice",
-    "PRICES",
-    "estimate_cost",
     # checkpointing
     "Checkpointer",
     "InMemoryCheckpointer",

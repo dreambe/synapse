@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
+from ..messages import ImageBlock, TextBlock
 from ..streaming import RunComplete, TextDelta
 from . import jsonrpc
 from .spec import (
@@ -23,6 +24,7 @@ from .spec import (
     AgentCard,
     AgentSkill,
     Artifact,
+    FilePart,
     Message,
     Task,
     TaskArtifactUpdateEvent,
@@ -141,10 +143,28 @@ class A2ADispatcher:
         context_id = msg.context_id or _uuid()
         return msg, context_id
 
+    @staticmethod
+    def _agent_input(msg: Message):
+        """Map A2A message parts to agent input: text, plus image FileParts."""
+        blocks: list = []
+        for part in msg.parts:
+            if isinstance(part, TextPart):
+                blocks.append(TextBlock(part.text))
+            elif isinstance(part, FilePart) and (part.mime_type or "").startswith("image/"):
+                if part.bytes:
+                    blocks.append(ImageBlock(data=part.bytes, media_type=part.mime_type))
+                elif part.uri:
+                    blocks.append(ImageBlock(url=part.uri))
+        if not blocks:
+            return msg.text
+        if len(blocks) == 1 and isinstance(blocks[0], TextBlock):
+            return blocks[0].text
+        return blocks
+
     async def _message_send(self, params: dict) -> dict:
         msg, context_id = self._incoming(params)
         task_id = msg.task_id or _uuid()
-        result = await self.agent.arun(msg.text)
+        result = await self.agent.arun(self._agent_input(msg))
         answer = Message.agent_text(result.output, task_id=task_id, context_id=context_id)
         task = Task(
             id=task_id,
@@ -176,7 +196,7 @@ class A2ADispatcher:
 
         output = ""
         run_result = None
-        async for ev in self.agent.astream(msg.text):
+        async for ev in self.agent.astream(self._agent_input(msg)):
             if task_id in self._canceled:
                 break
             if isinstance(ev, TextDelta):
@@ -243,18 +263,14 @@ class A2ADispatcher:
 
 
 def _run_metadata(result) -> dict:
-    """Expose usage + cost to the A2A caller via task metadata (so a *called*
-    agent reports what the work cost)."""
-    meta: dict = {
+    """Expose token usage to the A2A caller via task metadata."""
+    return {
         "usage": {
             "inputTokens": result.usage.input_tokens,
             "outputTokens": result.usage.output_tokens,
             "totalTokens": result.usage.total_tokens,
         }
     }
-    if result.cost is not None:
-        meta["cost"] = result.cost.to_dict()
-    return meta
 
 
 def _artifact_chunk(task_id: str, context_id: str, text: str) -> dict:

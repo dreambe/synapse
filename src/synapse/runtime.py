@@ -30,10 +30,9 @@ from typing import (
 )
 
 from ._util import maybe_await
-from .cost import Cost, estimate_cost, resolve_model_id
 from .errors import SynapseError
 from .guardrails import Guardrail, apply_guardrails
-from .messages import Message, ToolResultBlock, ToolUseBlock
+from .messages import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
 from .observability import Hooks, Usage
 from .streaming import ModelStreamEnd, RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
 from .tool import Tool
@@ -93,7 +92,6 @@ class RunResult:
     stop_reason: str = "end_turn"
     usage: Usage = field(default_factory=Usage)
     verify_rounds: int = 1
-    cost: Optional[Cost] = None
 
 
 @dataclass
@@ -115,7 +113,6 @@ class RunContext:
     checkpointer: Optional["Checkpointer"] = None
     run_id: Optional[str] = None
     tool_search: bool = False
-    pricing: Optional[dict] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -158,6 +155,42 @@ async def _emit(ctx: RunContext, method: str, *args: Any) -> None:
 
 def _normalize_approval(value: Any) -> ApprovalDecision:
     return value if isinstance(value, ApprovalDecision) else ApprovalDecision(allow=bool(value))
+
+
+_BLOCK_TYPES = (TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock)
+
+
+def _tool_result_content(result: Any):
+    """Coerce a tool's return value into tool_result content.
+
+    Rich returns (an ``ImageBlock``, or a list of content blocks) pass through
+    for multimodal results; everything else is stringified.
+    """
+    if result is None:
+        return ""
+    if isinstance(result, ImageBlock):
+        return [result]
+    if isinstance(result, (list, tuple)) and all(isinstance(b, _BLOCK_TYPES) for b in result):
+        return list(result)
+    if isinstance(result, str):
+        return result
+    return str(result)
+
+
+def _content_text(content: Any) -> str:
+    """A short textual rendering of (possibly multimodal) content for events."""
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content:
+        parts.append(b.text if isinstance(b, TextBlock) else f"[{getattr(b, 'type', 'block')}]")
+    return " ".join(parts)
+
+
+def _render_input(user_input: Any) -> str:
+    if isinstance(user_input, str):
+        return user_input
+    return " ".join(b.text for b in user_input if isinstance(b, TextBlock))
 
 
 def _normalize_verdict(value: Any) -> Verdict:
@@ -217,7 +250,7 @@ async def _execute_tool_use(
                 result = await asyncio.wait_for(call, ctx.tool_timeout)
             else:
                 result = await call
-        out = ToolResultBlock(block.id, "" if result is None else str(result))
+        out = ToolResultBlock(block.id, _tool_result_content(result))
     except asyncio.TimeoutError:
         out = ToolResultBlock(
             block.id, f"Error: tool {block.name!r} timed out after {ctx.tool_timeout}s", is_error=True
@@ -292,7 +325,9 @@ async def _drive_stream(
             *(_execute_tool_use(ctx, tool_map(), block, sem) for block in uses)
         )
         for r in results:
-            yield ToolOutput(id=r.tool_use_id, name="", content=r.content, is_error=r.is_error)
+            yield ToolOutput(
+                id=r.tool_use_id, name="", content=_content_text(r.content), is_error=r.is_error
+            )
         messages.append(Message(role="user", content=list(results)))
 
         if ctx.checkpointer is not None and ctx.run_id is not None:
@@ -352,8 +387,12 @@ async def arun_stream(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ctx.timeout if ctx.timeout else None
 
-    await _emit(ctx, "on_run_start", agent.name, user_input)
-    cleaned = await apply_guardrails(user_input, ctx.input_guardrails)
+    await _emit(ctx, "on_run_start", agent.name, _render_input(user_input))
+    if isinstance(user_input, str):
+        user_content: Any = await apply_guardrails(user_input, ctx.input_guardrails)
+    else:
+        # Multimodal input (list of blocks): guardrails run on text only.
+        user_content = user_input
 
     async def _stream_body() -> AsyncIterator[RunEvent]:
         messages: list[Message] = []
@@ -363,7 +402,7 @@ async def arun_stream(
             restored = await ctx.checkpointer.load(ctx.run_id)
             if restored:
                 messages = restored
-        messages.append(Message(role="user", content=cleaned))
+        messages.append(Message(role="user", content=user_content))
 
         iterations = 0
         stop_reason = "end_turn"
@@ -379,7 +418,6 @@ async def arun_stream(
 
         output = next((m.text for m in reversed(messages) if m.role == "assistant"), "")
         output = await apply_guardrails(output, ctx.output_guardrails)
-        cost = estimate_cost(ctx.usage, resolve_model_id(agent.model), pricing=ctx.pricing)
         result = RunResult(
             output=output,
             messages=messages,
@@ -388,7 +426,6 @@ async def arun_stream(
             stop_reason=stop_reason,
             usage=ctx.usage,
             verify_rounds=rounds,
-            cost=cost,
         )
         await _emit(ctx, "on_run_end", result)
         yield RunComplete(result=result)

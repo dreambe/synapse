@@ -103,7 +103,6 @@ class Agent:
             compactor=opts.get("compactor"),
             checkpointer=opts.get("checkpointer"),
             run_id=opts.get("run_id"),
-            pricing=opts.get("pricing"),
             tool_search=(
                 self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
             ),
@@ -111,7 +110,7 @@ class Agent:
 
     async def arun(
         self,
-        user_input: str,
+        user_input: "str | list",
         *,
         max_iterations: int = 12,
         session: Session | None = None,
@@ -129,7 +128,6 @@ class Agent:
         compactor: "Compactor | None" = None,
         checkpointer: "Checkpointer | None" = None,
         run_id: str | None = None,
-        pricing: dict | None = None,
         tool_search: bool | None = None,
     ) -> RunResult:
         """Run this agent to completion (async). The canonical, typed entry point."""
@@ -149,18 +147,17 @@ class Agent:
             compactor=compactor,
             checkpointer=checkpointer,
             run_id=run_id,
-            pricing=pricing,
             tool_search=tool_search,
         )
         return await arun_agent(self, user_input, session=session, context=ctx)
 
-    def run(self, user_input: str, **kwargs) -> RunResult:
+    def run(self, user_input: "str | list", **kwargs) -> RunResult:
         """Synchronous wrapper — accepts the same keyword arguments as :meth:`arun`."""
         return run_sync(self.arun(user_input, **kwargs))
 
     def astream(
         self,
-        user_input: str,
+        user_input: "str | list",
         *,
         session: Session | None = None,
         max_iterations: int = 12,

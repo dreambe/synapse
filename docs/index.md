@@ -8,8 +8,7 @@ anywhere — in-process, streaming, or over the **A2A protocol**.
 ## Guides
 
 - [Getting started](getting-started.md) — install, your first agent, sync/async/streaming.
-- [Guide](guide.md) — tools, `RunContext` options, memory, context compaction, hooks, guardrails, approval, verifier, routing, teams, resilience.
-- [Cost accounting](cost.md) — turn token usage into money, per call and per A2A request.
+- [Guide](guide.md) — tools, multimodal, `RunContext` options, memory, context compaction, hooks, guardrails, approval, verifier, routing, teams, resilience.
 - [Agent-to-agent (A2A)](a2a.md) — serve to / consume from the A2A ecosystem, push notifications.
 
 ## The 60-second tour
@@ -29,7 +28,7 @@ print(agent.run("what is 19 * 23 + 5?").output)
 
 # async
 result = await agent.arun("...")
-print(result.usage.total_tokens, result.cost.total)  # observability + cost
+print(result.usage.total_tokens)  # token observability
 
 # streaming
 async for ev in agent.astream("..."):

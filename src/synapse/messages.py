@@ -7,8 +7,11 @@ produced a turn.
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 from dataclasses import dataclass, field
-from typing import Union
+from pathlib import Path
+from typing import Optional, Union
 
 
 @dataclass
@@ -36,24 +39,72 @@ class ToolUseBlock:
 
 
 @dataclass
+class ImageBlock:
+    """An image, by base64 data (+ media type) or by URL.
+
+    Appears in user input and in tool results (multimodal). Mirrors the
+    Anthropic image content block on the wire.
+    """
+
+    data: Optional[str] = None
+    media_type: Optional[str] = None
+    url: Optional[str] = None
+    type: str = field(default="image", init=False)
+
+    def to_dict(self) -> dict:
+        if self.url:
+            source = {"type": "url", "url": self.url}
+        else:
+            source = {
+                "type": "base64",
+                "media_type": self.media_type or "image/png",
+                "data": self.data or "",
+            }
+        return {"type": "image", "source": source}
+
+    @classmethod
+    def from_base64(cls, data: str, media_type: str = "image/png") -> "ImageBlock":
+        return cls(data=data, media_type=media_type)
+
+    @classmethod
+    def from_url(cls, url: str) -> "ImageBlock":
+        return cls(url=url)
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "ImageBlock":
+        p = Path(path)
+        media_type = mimetypes.guess_type(p.name)[0] or "image/png"
+        data = base64.standard_b64encode(p.read_bytes()).decode("ascii")
+        return cls(data=data, media_type=media_type)
+
+
+@dataclass
 class ToolResultBlock:
-    """The result of executing a tool, fed back to the model."""
+    """The result of executing a tool, fed back to the model.
+
+    ``content`` is either a string or a list of content blocks (e.g. text +
+    images) for multimodal tool results.
+    """
 
     tool_use_id: str
-    content: str
+    content: "Union[str, list[Block]]"
     is_error: bool = False
     type: str = field(default="tool_result", init=False)
 
     def to_dict(self) -> dict:
+        if isinstance(self.content, str):
+            content: object = self.content
+        else:
+            content = [b.to_dict() for b in self.content]
         return {
             "type": "tool_result",
             "tool_use_id": self.tool_use_id,
-            "content": self.content,
+            "content": content,
             "is_error": self.is_error,
         }
 
 
-Block = Union[TextBlock, ToolUseBlock, ToolResultBlock]
+Block = Union[TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock]
 
 
 @dataclass
@@ -88,12 +139,19 @@ def _block_from_dict(data: dict) -> Block:
     kind = data.get("type")
     if kind == "text":
         return TextBlock(text=data["text"])
+    if kind == "image":
+        src = data.get("source", {})
+        if src.get("type") == "url":
+            return ImageBlock(url=src.get("url"))
+        return ImageBlock(data=src.get("data"), media_type=src.get("media_type"))
     if kind == "tool_use":
         return ToolUseBlock(id=data["id"], name=data["name"], input=data.get("input", {}))
     if kind == "tool_result":
+        raw = data.get("content", "")
+        content = [_block_from_dict(b) for b in raw] if isinstance(raw, list) else raw
         return ToolResultBlock(
             tool_use_id=data["tool_use_id"],
-            content=data.get("content", ""),
+            content=content,
             is_error=data.get("is_error", False),
         )
     raise ValueError(f"unknown content block type: {kind!r}")

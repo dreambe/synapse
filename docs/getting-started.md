@@ -71,7 +71,7 @@ async for ev in agent.astream("hello"):
 ```
 
 `RunResult` carries: `output`, `messages`, `iterations`, `stop_reason`,
-`usage` (tokens), `cost` (money), `verify_rounds`.
+`usage` (tokens), `verify_rounds`.
 
 ## Composing agents
 

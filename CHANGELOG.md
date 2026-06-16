@@ -9,13 +9,14 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
-- **Cost accounting.** Every `RunResult` now carries a `Cost` (tokens priced to
-  USD per model via `synapse.cost.PRICES`, overridable with `RunContext.pricing`);
-  unknown models report `priced=False` rather than a wrong number. `CostTracker`
-  (a hook) sums spend across runs, and A2A completed tasks expose usage + cost in
-  `metadata` so a *called* agent reports cost back to the caller.
+- **Multimodal content.** `ImageBlock` (base64/url/file) can appear in user
+  input and tool results; tool results may return rich content (text + images)
+  instead of only a string. The Anthropic backend serializes images on the wire.
+  A2A image `FilePart`s map to image input.
+- **Token usage on A2A tasks.** Completed A2A tasks expose token usage in
+  `metadata`. (Dollar-cost pricing was prototyped and removed — usage only.)
 - **Documentation.** A `docs/` set: getting-started, full guide (every run
-  option), cost accounting, and A2A integration.
+  option, incl. multimodal), and A2A integration.
 - **A2A protocol compliance (v0.3.0).** A strict Agent2Agent implementation:
   `spec` types (Message/Part/Task/TaskStatus/Artifact/AgentCard with the exact
   `kind` discriminators and `TaskState` literals), a JSON-RPC 2.0
