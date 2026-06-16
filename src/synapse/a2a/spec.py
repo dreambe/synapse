@@ -224,6 +224,7 @@ class Task:
     status: TaskStatus
     artifacts: list[Artifact] = field(default_factory=list)
     history: list[Message] = field(default_factory=list)
+    metadata: Optional[dict] = None
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {
@@ -236,6 +237,8 @@ class Task:
             d["artifacts"] = [a.to_dict() for a in self.artifacts]
         if self.history:
             d["history"] = [m.to_dict() for m in self.history]
+        if self.metadata:
+            d["metadata"] = self.metadata
         return d
 
 

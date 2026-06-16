@@ -152,6 +152,7 @@ class A2ADispatcher:
             status=TaskStatus(state=TaskState.COMPLETED, message=answer),
             artifacts=[Artifact(parts=[TextPart(result.output)], name="response")],
             history=[msg, answer],
+            metadata=_run_metadata(result),
         )
         self._tasks[task_id] = task
         await self._maybe_push(task)
@@ -174,6 +175,7 @@ class A2ADispatcher:
         )
 
         output = ""
+        run_result = None
         async for ev in self.agent.astream(msg.text):
             if task_id in self._canceled:
                 break
@@ -181,6 +183,7 @@ class A2ADispatcher:
                 yield jsonrpc.success(request_id, _artifact_chunk(task_id, context_id, ev.text))
             elif isinstance(ev, RunComplete):
                 output = ev.result.output
+                run_result = ev.result
 
         final_state = TaskState.CANCELED if task_id in self._canceled else TaskState.COMPLETED
         answer = Message.agent_text(output, task_id=task_id, context_id=context_id)
@@ -190,6 +193,7 @@ class A2ADispatcher:
             context_id=context_id,
             status=final_status,
             artifacts=[Artifact(parts=[TextPart(output)], name="response")],
+            metadata=_run_metadata(run_result) if run_result is not None else None,
         )
         yield jsonrpc.success(
             request_id,
@@ -236,6 +240,21 @@ class A2ADispatcher:
         from . import push
 
         await asyncio.to_thread(push.deliver, config, task.to_dict())
+
+
+def _run_metadata(result) -> dict:
+    """Expose usage + cost to the A2A caller via task metadata (so a *called*
+    agent reports what the work cost)."""
+    meta: dict = {
+        "usage": {
+            "inputTokens": result.usage.input_tokens,
+            "outputTokens": result.usage.output_tokens,
+            "totalTokens": result.usage.total_tokens,
+        }
+    }
+    if result.cost is not None:
+        meta["cost"] = result.cost.to_dict()
+    return meta
 
 
 def _artifact_chunk(task_id: str, context_id: str, text: str) -> dict:

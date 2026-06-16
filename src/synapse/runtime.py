@@ -30,6 +30,7 @@ from typing import (
 )
 
 from ._util import maybe_await
+from .cost import Cost, estimate_cost, resolve_model_id
 from .errors import SynapseError
 from .guardrails import Guardrail, apply_guardrails
 from .messages import Message, ToolResultBlock, ToolUseBlock
@@ -92,6 +93,7 @@ class RunResult:
     stop_reason: str = "end_turn"
     usage: Usage = field(default_factory=Usage)
     verify_rounds: int = 1
+    cost: Optional[Cost] = None
 
 
 @dataclass
@@ -113,6 +115,7 @@ class RunContext:
     checkpointer: Optional["Checkpointer"] = None
     run_id: Optional[str] = None
     tool_search: bool = False
+    pricing: Optional[dict] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -376,6 +379,7 @@ async def arun_stream(
 
         output = next((m.text for m in reversed(messages) if m.role == "assistant"), "")
         output = await apply_guardrails(output, ctx.output_guardrails)
+        cost = estimate_cost(ctx.usage, resolve_model_id(agent.model), pricing=ctx.pricing)
         result = RunResult(
             output=output,
             messages=messages,
@@ -384,6 +388,7 @@ async def arun_stream(
             stop_reason=stop_reason,
             usage=ctx.usage,
             verify_rounds=rounds,
+            cost=cost,
         )
         await _emit(ctx, "on_run_end", result)
         yield RunComplete(result=result)

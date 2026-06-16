@@ -9,6 +9,13 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Cost accounting.** Every `RunResult` now carries a `Cost` (tokens priced to
+  USD per model via `synapse.cost.PRICES`, overridable with `RunContext.pricing`);
+  unknown models report `priced=False` rather than a wrong number. `CostTracker`
+  (a hook) sums spend across runs, and A2A completed tasks expose usage + cost in
+  `metadata` so a *called* agent reports cost back to the caller.
+- **Documentation.** A `docs/` set: getting-started, full guide (every run
+  option), cost accounting, and A2A integration.
 - **A2A protocol compliance (v0.3.0).** A strict Agent2Agent implementation:
   `spec` types (Message/Part/Task/TaskStatus/Artifact/AgentCard with the exact
   `kind` discriminators and `TaskState` literals), a JSON-RPC 2.0
