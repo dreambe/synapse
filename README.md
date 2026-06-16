@@ -40,6 +40,7 @@ and multi-agent meshes where agents call each other.
 pip install synapse                 # core (stdlib only)
 pip install "synapse[anthropic]"    # + the Claude backend
 pip install "synapse[server]"       # + uvicorn for async high-concurrency serving
+pip install "synapse[mcp]"          # + Model Context Protocol client
 ```
 
 Requires Python 3.10+.
@@ -190,6 +191,45 @@ synapse card  http://localhost:8080             # fetch a remote agent card
 
 Targets are `module:attribute` or `path/to/file.py:attribute`.
 
+## Production capabilities (v0.2)
+
+These are opt-in keyword arguments on `run`/`arun` (or a `RunContext`), so the
+simple path stays simple. They map onto the canonical agentic design patterns
+while tracking where the frontier has moved (verifier loops, context
+engineering, durable execution, observability-as-infrastructure).
+
+```python
+result = agent.run(
+    "ship the release",
+    hooks=CollectingHooks(),            # observability: lifecycle events + token usage
+    approval=lambda name, inp: ...,     # human-in-the-loop: gate tools (requires_approval=True)
+    verify=my_checker,                  # reflection → iterate-until-pass (returns Verdict)
+    input_guardrails=[block_keywords([...])],
+    output_guardrails=[redact(r"...")], # guardrails on input/output
+    token_budget=200_000,               # resource-aware: stop when the budget is hit
+    checkpointer=FileCheckpointer("runs"), run_id="job-42",  # durable execution / resume
+)
+```
+
+| Capability | API | Pattern it covers |
+|---|---|---|
+| Observability hooks + usage | `Hooks`, `CollectingHooks`, `Usage` | Evaluation & Monitoring |
+| Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | Human-in-the-Loop |
+| Verifier loop | `verify=` → `Verdict` | Reflection + Goal Monitoring |
+| Guardrails | `input_guardrails=` / `output_guardrails=` | Guardrails / Safety |
+| Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | Memory Management |
+| Routing | `Router`, `ModelRouter` | Routing |
+| Resilience | `RetryModel(model, fallbacks=[...])` | Exception Handling & Recovery |
+| Token budgets | `token_budget=` | Resource-Aware Optimization |
+| Compaction | `Compactor` | Context engineering *(frontier)* |
+| Tool search | `Agent(tool_search=True)`, `select_tools` | Context engineering *(frontier)* |
+| Checkpoint / resume | `Checkpointer`, `run_id=` | Durable execution *(frontier)* |
+| MCP tools | `synapse.mcp.tools_from_session` | Model Context Protocol |
+| Teams + blackboard | `Team`, `Blackboard` | Multi-Agent Collaboration |
+
+See [`examples/advanced_agent.py`](examples/advanced_agent.py) for several of
+these together.
+
 ## Architecture
 
 ```
@@ -217,6 +257,14 @@ Anthropic   Echo      Scripted
 | `synapse.messages`    | Provider-neutral messages and content blocks          |
 | `synapse.models`      | The `Model` interface and backends                    |
 | `synapse.registry`    | `AgentRegistry` for name-based lookup/routing         |
+| `synapse.router`      | `Router` / `ModelRouter` — pick an agent, then run it |
+| `synapse.observability` | Hooks, lifecycle events, token `Usage`              |
+| `synapse.memory`      | Cross-run `Memory` backends + auto memory tools       |
+| `synapse.guardrails`  | Input/output guardrails                               |
+| `synapse.context`     | `Compactor` and tool selection (context engineering)  |
+| `synapse.checkpoint`  | `Checkpointer` backends for durable execution         |
+| `synapse.team`        | `Team` + `Blackboard` multi-agent collaboration       |
+| `synapse.mcp`         | Adapter exposing MCP server tools as synapse tools    |
 | `synapse.a2a`         | Agent-to-agent protocol, stdlib + ASGI servers, client |
 
 ## Development

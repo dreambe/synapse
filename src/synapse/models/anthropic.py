@@ -12,6 +12,7 @@ from typing import Any
 
 from ..errors import ModelError
 from ..messages import Message, TextBlock, ToolUseBlock
+from ..observability import Usage
 from ..tool import Tool
 from .base import Model, ModelResponse
 
@@ -84,4 +85,14 @@ class AnthropicModel(Model):
             # thinking blocks are intentionally dropped from the persisted turn
 
         stop = "tool_use" if response.stop_reason == "tool_use" else "end_turn"
-        return ModelResponse(message=Message(role="assistant", content=content), stop_reason=stop)
+        usage = None
+        if getattr(response, "usage", None) is not None:
+            usage = Usage(
+                input_tokens=getattr(response.usage, "input_tokens", 0) or 0,
+                output_tokens=getattr(response.usage, "output_tokens", 0) or 0,
+            )
+        return ModelResponse(
+            message=Message(role="assistant", content=content),
+            stop_reason=stop,
+            usage=usage,
+        )

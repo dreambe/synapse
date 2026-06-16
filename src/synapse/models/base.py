@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from ..messages import Message
+from ..observability import Usage
 from ..tool import Tool
 
 
@@ -14,11 +15,13 @@ class ModelResponse:
     """A single assistant turn returned by a backend.
 
     ``stop_reason`` is normalized to one of ``"end_turn"`` or ``"tool_use"``;
-    the run loop only branches on whether tools were requested.
+    the run loop only branches on whether tools were requested. ``usage``
+    carries token accounting when the backend reports it.
     """
 
     message: Message
     stop_reason: str = "end_turn"
+    usage: Usage | None = None
 
 
 class Model(ABC):

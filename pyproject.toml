@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synapse"
-version = "0.1.0"
+version = "0.2.0"
 description = "A composable agent framework: build agents once, call them anywhere — in-process, over the network, or agent-to-agent."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,7 @@ dependencies = []
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 server = ["uvicorn>=0.23"]
+mcp = ["mcp>=1.0"]
 dev = ["pytest>=7", "pytest-asyncio>=0.23", "ruff>=0.4", "uvicorn>=0.23"]
 
 [project.scripts]

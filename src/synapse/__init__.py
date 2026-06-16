@@ -20,6 +20,8 @@ Quick start::
 from __future__ import annotations
 
 from .agent import Agent
+from .checkpoint import Checkpointer, FileCheckpointer, InMemoryCheckpointer
+from .context import Compactor, select_tools
 from .errors import (
     A2AError,
     ConfigurationError,
@@ -28,15 +30,48 @@ from .errors import (
     SynapseError,
     ToolError,
 )
+from .guardrails import (
+    Guardrail,
+    GuardrailViolation,
+    apply_guardrails,
+    block_keywords,
+    max_length,
+    redact,
+)
+from .memory import FileMemory, InMemoryMemory, Memory, memory_tools
 from .messages import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from .models import AnthropicModel, EchoModel, Model, ModelResponse, ScriptedModel
+from .models import (
+    AnthropicModel,
+    EchoModel,
+    Model,
+    ModelResponse,
+    RetryModel,
+    ScriptedModel,
+)
+from .observability import (
+    CollectingHooks,
+    CompositeHooks,
+    Hooks,
+    Usage,
+)
 from .registry import AgentRegistry
-from .runtime import RunResult, Session, arun_agent, run_agent
+from .router import ModelRouter, Router
+from .runtime import (
+    ApprovalDecision,
+    RunContext,
+    RunResult,
+    Session,
+    Verdict,
+    arun_agent,
+    run_agent,
+)
+from .team import Blackboard, Team
 from .tool import Tool, tool
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
+    # core
     "Agent",
     "AgentRegistry",
     "Tool",
@@ -45,15 +80,52 @@ __all__ = [
     "TextBlock",
     "ToolUseBlock",
     "ToolResultBlock",
-    "Model",
-    "ModelResponse",
-    "AnthropicModel",
-    "EchoModel",
-    "ScriptedModel",
     "RunResult",
+    "RunContext",
     "Session",
     "run_agent",
     "arun_agent",
+    # models
+    "Model",
+    "ModelResponse",
+    "AnthropicModel",
+    "RetryModel",
+    "EchoModel",
+    "ScriptedModel",
+    # observability
+    "Hooks",
+    "CollectingHooks",
+    "CompositeHooks",
+    "Usage",
+    # memory
+    "Memory",
+    "InMemoryMemory",
+    "FileMemory",
+    "memory_tools",
+    # guardrails
+    "Guardrail",
+    "GuardrailViolation",
+    "apply_guardrails",
+    "block_keywords",
+    "max_length",
+    "redact",
+    # verification / approval
+    "Verdict",
+    "ApprovalDecision",
+    # routing
+    "Router",
+    "ModelRouter",
+    # context engineering
+    "Compactor",
+    "select_tools",
+    # checkpointing
+    "Checkpointer",
+    "InMemoryCheckpointer",
+    "FileCheckpointer",
+    # teams
+    "Team",
+    "Blackboard",
+    # errors
     "SynapseError",
     "ConfigurationError",
     "ModelError",

@@ -34,6 +34,9 @@ class Tool:
     description: str
     parameters: dict
     func: Callable[..., Any]
+    # When True, the run loop asks the configured approval callback before
+    # executing this tool (human-in-the-loop / policy gating).
+    requires_approval: bool = False
 
     @property
     def is_async(self) -> bool:
@@ -70,6 +73,7 @@ def _build_tool(
     func: Callable[..., Any],
     name: str | None,
     description: str | None,
+    requires_approval: bool = False,
 ) -> Tool:
     sig = inspect.signature(func)
     try:
@@ -100,6 +104,7 @@ def _build_tool(
             "required": required,
         },
         func=func,
+        requires_approval=requires_approval,
     )
 
 
@@ -108,6 +113,7 @@ def tool(
     *,
     name: str | None = None,
     description: str | None = None,
+    requires_approval: bool = False,
 ) -> Any:
     """Turn a function (sync or ``async def``) into a :class:`Tool`.
 
@@ -125,7 +131,7 @@ def tool(
     """
 
     def wrap(f: Callable[..., Any]) -> Tool:
-        return _build_tool(f, name, description)
+        return _build_tool(f, name, description, requires_approval)
 
     if func is not None:
         return wrap(func)
