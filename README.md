@@ -145,45 +145,59 @@ results = await asyncio.gather(*(a.arun(task) for a, task in jobs))
 Use `await agent.arun(...)` inside async code; `agent.run(...)` is a thin sync
 wrapper that works anywhere (scripts, notebooks, threads).
 
-## Serving an agent (network A2A)
+## Agent-to-agent (A2A)
 
-Turn an agent into an HTTP service. Two paths, same protocol:
+synapse speaks the **Agent2Agent protocol v0.3.0** (JSON-RPC 2.0), so it
+interoperates with any A2A-compliant peer — and a compliant remote agent can be
+wrapped as a local tool, bridging ecosystems.
+
+### Serve an agent to the A2A ecosystem
 
 ```python
-# Zero dependencies — stdlib threaded server (great for dev/tests)
-from synapse.a2a import serve
-serve(agent, port=8080)
+from synapse.a2a import create_a2a_app
+app = create_a2a_app(agent)          # uvicorn yourmodule:app
+```
 
-# High concurrency — native-async ASGI app under uvicorn
-from synapse.a2a import create_app
-app = create_app(agent)          # run with: uvicorn yourmodule:app
+Endpoints (A2A-compliant):
+
+| Method | Path                              | Purpose                                  |
+|--------|-----------------------------------|------------------------------------------|
+| `GET`  | `/.well-known/agent-card.json`    | Agent Card (discovery)                   |
+| `POST` | `/`                               | JSON-RPC 2.0                             |
+
+JSON-RPC methods: `message/send`, `message/stream` (SSE), `tasks/get`,
+`tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`+`get`.
+Tasks carry the real lifecycle (`submitted → working → completed/canceled/…`)
+with artifacts and history.
+
+### Call any A2A agent — and wrap it as a tool
+
+```python
+from synapse.a2a import A2AClient
+
+client = A2AClient("http://some-a2a-agent.example.com")
+print(client.card().name)                 # discover (works for any A2A agent)
+print(client.ask("summarize the news"))   # message/send → final text
+async for ev in client.astream_message("..."):  # message/stream (SSE)
+    ...
+
+# Cross-ecosystem delegation: a synapse agent calls a standards-compliant peer.
+coordinator = Agent("boss", tools=[client.as_tool()])
+```
+
+### synapse-native convenience layer
+
+For quick local/dev use there's also a lightweight `/run` + `/run/stream`
+server (not the A2A wire format — a synapse convenience):
+
+```python
+from synapse.a2a import serve, RemoteAgent
+serve(agent, port=8080)                       # stdlib threaded, zero-dep
+RemoteAgent("http://127.0.0.1:8080").run("hi")
 ```
 
 ```bash
 synapse serve examples/basic_agent.py:agent --port 8080
-# uses uvicorn automatically if synapse[server] is installed, else stdlib
-```
-
-Endpoints:
-
-| Method | Path                        | Purpose                          |
-|--------|-----------------------------|----------------------------------|
-| `GET`  | `/.well-known/agent.json`   | Agent card (discovery)           |
-| `GET`  | `/health`                   | Liveness probe                   |
-| `POST` | `/run`                      | Run the agent on a task          |
-
-Call it from another process:
-
-```python
-from synapse.a2a import RemoteAgent
-
-remote = RemoteAgent("http://127.0.0.1:8080")
-print(remote.card().skills)            # discover capabilities
-print(remote.run("hello").output)      # invoke it (sync)
-await remote.arun("hello")             # or async — many calls in flight at once
-
-# Or let a local agent delegate to the remote one, over the wire:
-local_coordinator = Agent("boss", tools=[remote.as_tool()])
 ```
 
 ## CLI
@@ -230,6 +244,7 @@ result = agent.run(
 | Resilience (transient vs permanent) | `RetryModel(model, fallbacks=[...], retry_on=...)` | **solid** |
 | Token budgets | `token_budget=` | **solid** |
 | MCP tools | `synapse.mcp.tools_from_session` | **solid** |
+| A2A protocol v0.3.0 (JSON-RPC, tasks, SSE) | `create_a2a_app`, `A2AClient` | **solid** |
 | Cross-run memory | `Agent(memory=...)`, `InMemoryMemory`, `FileMemory` | first cut — keyword search |
 | Routing | `Router`, `ModelRouter` | first cut — `Router` keyword-based |
 | Tool search | `Agent(tool_search=True)`, `select_tools` | first cut — keyword ranking |
@@ -290,17 +305,13 @@ Anthropic   Echo      Scripted
 | `synapse.checkpoint`  | `Checkpointer` backends for durable execution         |
 | `synapse.team`        | `Team` + `Blackboard` multi-agent collaboration       |
 | `synapse.mcp`         | Adapter exposing MCP server tools as synapse tools    |
-| `synapse.a2a`         | Agent-to-agent protocol, stdlib + ASGI servers, client |
+| `synapse.a2a`         | A2A protocol v0.3.0 (spec types, JSON-RPC dispatcher, compliant server + client) and the native convenience layer |
 
 ## Status & honest limitations
 
 This is an experimental framework with a deliberate point of view, not a
 finished product. What it does **not** do yet (by design or as known debt):
 
-- **"A2A" is synapse-native, not the formal spec.** The HTTP protocol and
-  agent card here are our own (`synapse-a2a/0.1`); they are *not* wire-compatible
-  with the emerging Google A2A standard (JSON-RPC, task lifecycle). Don't expect
-  cross-vendor interop. Alignment-or-rename is on the roadmap.
 - **Checkpointing is not true durable execution.** It snapshots the message
   transcript; resuming an interrupted run **replays tools** (not idempotent) and
   doesn't recover a half-finished parallel tool batch atomically.
@@ -312,8 +323,8 @@ finished product. What it does **not** do yet (by design or as known debt):
 - **Not battle-tested against a live model in CI.** The suite is fully offline
   (fakes); it proves the plumbing, not real-model behavior (tool-call JSON
   quirks, thinking blocks). A gated integration test is on the roadmap.
-- **The name `synapse` collides** with several projects (e.g. the Matrix
-  homeserver) and is likely taken on PyPI — a rename is an open decision.
+- **A2A push notifications are best-effort.** The webhook fires fire-and-forget
+  on terminal state; there's no retry/signing yet.
 
 See [CHANGELOG.md](CHANGELOG.md) for what landed when.
 

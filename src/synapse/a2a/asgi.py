@@ -20,11 +20,80 @@ import json
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..runtime import RunContext, Session
+from .dispatcher import A2ADispatcher
 from .protocol import RunRequest, RunResponse, run_event_to_dict
 from .server import CARD_PATH
+from .spec import WELL_KNOWN_PATH, WELL_KNOWN_PATH_LEGACY
 
 if TYPE_CHECKING:
     from ..agent import Agent
+
+
+def _base_url(scope: Scope) -> str:
+    headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+    host = headers.get("host", "localhost")
+    scheme = scope.get("scheme", "http")
+    return f"{scheme}://{host}"
+
+
+def create_a2a_app(agent: "Agent"):
+    """An ASGI app serving ``agent`` over the **A2A protocol** (v0.3.0).
+
+    Endpoints:
+        GET  /.well-known/agent-card.json   → the A2A Agent Card
+        POST /                              → JSON-RPC 2.0 (message/send,
+             message/stream [SSE], tasks/get, tasks/cancel, tasks/resubscribe,
+             tasks/pushNotificationConfig/set,get)
+    """
+    dispatcher = A2ADispatcher(agent)
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        if scope["type"] != "http":  # pragma: no cover
+            return
+
+        method, path = scope["method"], scope["path"]
+        if method == "GET" and path in (WELL_KNOWN_PATH, WELL_KNOWN_PATH_LEGACY):
+            await _send_json(send, 200, dispatcher.agent_card(_base_url(scope)).to_dict())
+            return
+
+        if method == "POST":
+            try:
+                payload = json.loads(await _read_body(receive) or b"{}")
+            except ValueError:
+                await _send_json(send, 200, {"jsonrpc": "2.0", "id": None,
+                                             "error": {"code": -32700, "message": "parse error"}})
+                return
+            rpc_method = payload.get("method")
+            if rpc_method in ("message/stream", "tasks/resubscribe"):
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"text/event-stream"),
+                            (b"cache-control", b"no-cache"),
+                        ],
+                    }
+                )
+                async for env in dispatcher.stream(payload):
+                    frame = f"data: {json.dumps(env)}\n\n".encode()
+                    await send({"type": "http.response.body", "body": frame, "more_body": True})
+                await send({"type": "http.response.body", "body": b"", "more_body": False})
+                return
+            await _send_json(send, 200, await dispatcher.handle(payload))
+            return
+
+        await _send_json(send, 404, {"error": "not found"})
+
+    return app
 
 Scope = dict[str, Any]
 Receive = Callable[[], Awaitable[dict]]

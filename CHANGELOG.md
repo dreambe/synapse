@@ -9,6 +9,16 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **A2A protocol compliance (v0.3.0).** A strict Agent2Agent implementation:
+  `spec` types (Message/Part/Task/TaskStatus/Artifact/AgentCard with the exact
+  `kind` discriminators and `TaskState` literals), a JSON-RPC 2.0
+  `A2ADispatcher` (`message/send`, `message/stream` SSE, `tasks/get`,
+  `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`+`get`),
+  the compliant `create_a2a_app` server (card at `/.well-known/agent-card.json`),
+  and an `A2AClient` that talks to *any* A2A agent. **Surpass:** `A2AClient.as_tool()`
+  wraps a standards-compliant remote agent as a synapse tool (cross-ecosystem
+  delegation), plus best-effort push-notification webhooks. The earlier
+  synapse-native `/run` server is kept as a labelled convenience layer.
 - **Streaming as the execution primitive.** `Model.stream()` (native token
   streaming in the Anthropic backend; a single-chunk default for every other
   backend), `Agent.astream()` yielding `TextDelta` / `ToolCall` / `ToolOutput`
