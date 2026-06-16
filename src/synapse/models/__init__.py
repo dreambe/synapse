@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .anthropic import DEFAULT_MODEL, AnthropicModel
 from .base import Model, ModelResponse
+from .openai import OpenAIModel
 from .resilient import RetryModel
 from .scripted import EchoModel, ScriptedModel
 
@@ -17,6 +18,7 @@ __all__ = [
     "Model",
     "ModelResponse",
     "AnthropicModel",
+    "OpenAIModel",
     "RetryModel",
     "EchoModel",
     "ScriptedModel",

@@ -79,6 +79,59 @@ class ImageBlock:
 
 
 @dataclass
+class DocumentBlock:
+    """A document (PDF, text, …), by base64 data, URL, or inline text.
+
+    Appears in user input and tool results. Mirrors the Anthropic document
+    content block; other backends map it as best they can.
+    """
+
+    data: Optional[str] = None
+    media_type: Optional[str] = None
+    url: Optional[str] = None
+    text: Optional[str] = None
+    title: Optional[str] = None
+    type: str = field(default="document", init=False)
+
+    def to_dict(self) -> dict:
+        if self.url:
+            source = {"type": "url", "url": self.url}
+        elif self.text is not None:
+            source = {"type": "text", "media_type": "text/plain", "data": self.text}
+        else:
+            source = {
+                "type": "base64",
+                "media_type": self.media_type or "application/pdf",
+                "data": self.data or "",
+            }
+        d: dict = {"type": "document", "source": source}
+        if self.title:
+            d["title"] = self.title
+        return d
+
+    @classmethod
+    def from_base64(cls, data: str, media_type: str = "application/pdf", *, title: str | None = None):
+        return cls(data=data, media_type=media_type, title=title)
+
+    @classmethod
+    def from_url(cls, url: str, *, title: str | None = None) -> "DocumentBlock":
+        return cls(url=url, title=title)
+
+    @classmethod
+    def from_text(cls, text: str, *, title: str | None = None) -> "DocumentBlock":
+        return cls(text=text, title=title)
+
+    @classmethod
+    def from_file(cls, path: str | Path, *, title: str | None = None) -> "DocumentBlock":
+        p = Path(path)
+        media_type = mimetypes.guess_type(p.name)[0] or "application/pdf"
+        if media_type.startswith("text/"):
+            return cls(text=p.read_text(), title=title or p.name)
+        data = base64.standard_b64encode(p.read_bytes()).decode("ascii")
+        return cls(data=data, media_type=media_type, title=title or p.name)
+
+
+@dataclass
 class ToolResultBlock:
     """The result of executing a tool, fed back to the model.
 
@@ -104,7 +157,7 @@ class ToolResultBlock:
         }
 
 
-Block = Union[TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock]
+Block = Union[TextBlock, ImageBlock, DocumentBlock, ToolUseBlock, ToolResultBlock]
 
 
 @dataclass
@@ -144,6 +197,16 @@ def _block_from_dict(data: dict) -> Block:
         if src.get("type") == "url":
             return ImageBlock(url=src.get("url"))
         return ImageBlock(data=src.get("data"), media_type=src.get("media_type"))
+    if kind == "document":
+        src = data.get("source", {})
+        title = data.get("title")
+        if src.get("type") == "url":
+            return DocumentBlock(url=src.get("url"), title=title)
+        if src.get("type") == "text":
+            return DocumentBlock(text=src.get("data"), title=title)
+        return DocumentBlock(
+            data=src.get("data"), media_type=src.get("media_type"), title=title
+        )
     if kind == "tool_use":
         return ToolUseBlock(id=data["id"], name=data["name"], input=data.get("input", {}))
     if kind == "tool_result":

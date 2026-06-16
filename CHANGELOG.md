@@ -9,10 +9,15 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
-- **Multimodal content.** `ImageBlock` (base64/url/file) can appear in user
-  input and tool results; tool results may return rich content (text + images)
-  instead of only a string. The Anthropic backend serializes images on the wire.
-  A2A image `FilePart`s map to image input.
+- **Provider-neutral backends.** Added `OpenAIModel` — works with any OpenAI
+  Chat Completions-compatible endpoint (OpenAI, Azure, Together, Groq, Ollama,
+  vLLM, …) via `base_url`. Proves the `Model` abstraction; Anthropic stays the
+  default. `RetryModel` fallbacks work across providers.
+- **Multimodal content.** `ImageBlock` and `DocumentBlock` (PDF / text, via
+  base64 / url / file / inline text) can appear in user input and tool results;
+  tool results may return rich content instead of only a string. Backends
+  serialize them natively (Anthropic) or by best effort (OpenAI). Incoming A2A
+  `FilePart`s map to image or document input.
 - **Token usage on A2A tasks.** Completed A2A tasks expose token usage in
   `metadata`. (Dollar-cost pricing was prototyped and removed — usage only.)
 - **Documentation.** A `docs/` set: getting-started, full guide (every run

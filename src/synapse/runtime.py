@@ -32,7 +32,14 @@ from typing import (
 from ._util import maybe_await
 from .errors import SynapseError
 from .guardrails import Guardrail, apply_guardrails
-from .messages import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
+from .messages import (
+    DocumentBlock,
+    ImageBlock,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from .observability import Hooks, Usage
 from .streaming import ModelStreamEnd, RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
 from .tool import Tool
@@ -157,7 +164,7 @@ def _normalize_approval(value: Any) -> ApprovalDecision:
     return value if isinstance(value, ApprovalDecision) else ApprovalDecision(allow=bool(value))
 
 
-_BLOCK_TYPES = (TextBlock, ImageBlock, ToolUseBlock, ToolResultBlock)
+_BLOCK_TYPES = (TextBlock, ImageBlock, DocumentBlock, ToolUseBlock, ToolResultBlock)
 
 
 def _tool_result_content(result: Any):
@@ -168,7 +175,7 @@ def _tool_result_content(result: Any):
     """
     if result is None:
         return ""
-    if isinstance(result, ImageBlock):
+    if isinstance(result, (TextBlock, ImageBlock, DocumentBlock)):
         return [result]
     if isinstance(result, (list, tuple)) and all(isinstance(b, _BLOCK_TYPES) for b in result):
         return list(result)

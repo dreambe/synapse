@@ -39,12 +39,20 @@ from .guardrails import (
     redact,
 )
 from .memory import FileMemory, InMemoryMemory, Memory, memory_tools
-from .messages import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
+from .messages import (
+    DocumentBlock,
+    ImageBlock,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from .models import (
     AnthropicModel,
     EchoModel,
     Model,
     ModelResponse,
+    OpenAIModel,
     RetryModel,
     ScriptedModel,
 )
@@ -82,6 +90,7 @@ __all__ = [
     "Message",
     "TextBlock",
     "ImageBlock",
+    "DocumentBlock",
     "ToolUseBlock",
     "ToolResultBlock",
     "RunResult",
@@ -101,6 +110,7 @@ __all__ = [
     "Model",
     "ModelResponse",
     "AnthropicModel",
+    "OpenAIModel",
     "RetryModel",
     "EchoModel",
     "ScriptedModel",

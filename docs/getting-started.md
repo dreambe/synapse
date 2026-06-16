@@ -31,12 +31,17 @@ print(agent.run("What is 19 + 23?").output)
 ```
 
 By default an agent uses the Claude backend (`claude-opus-4-8`), which reads
-`ANTHROPIC_API_KEY` from the environment. Pick a different model:
+`ANTHROPIC_API_KEY` from the environment. synapse is provider-neutral — pick any
+backend:
 
 ```python
-from synapse import Agent, AnthropicModel
-agent = Agent("calc", model=AnthropicModel("claude-sonnet-4-6"))
+from synapse import Agent, AnthropicModel, OpenAIModel
+Agent("calc", model=AnthropicModel("claude-sonnet-4-6"))
+Agent("calc", model=OpenAIModel("gpt-4o"))                 # or any OpenAI-compatible
+Agent("calc", model=OpenAIModel("qwen2.5", base_url="http://localhost:11434/v1", api_key="x"))
 ```
+
+See the [guide](guide.md#models--providers) for details.
 
 ## Offline / testing — no API key
 

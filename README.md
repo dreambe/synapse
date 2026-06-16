@@ -45,6 +45,7 @@ and multi-agent meshes where agents call each other.
 ```bash
 pip install synapse                 # core (stdlib only)
 pip install "synapse[anthropic]"    # + the Claude backend
+pip install "synapse[openai]"       # + OpenAI-compatible backend (OpenAI/Azure/Together/Ollama/vLLM…)
 pip install "synapse[server]"       # + uvicorn for async high-concurrency serving
 pip install "synapse[mcp]"          # + Model Context Protocol client
 ```
@@ -240,7 +241,8 @@ result = agent.run(
 | Capability | API | Maturity |
 |---|---|---|
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
-| Multimodal (images in input & tool results) | `ImageBlock`, list-of-blocks input | **solid** |
+| Multimodal (images & documents, in & out) | `ImageBlock`, `DocumentBlock` | **solid** |
+| Provider-neutral backends | `AnthropicModel`, `OpenAIModel` (+ any OpenAI-compatible) | **solid** |
 | Bounded tool concurrency | `max_parallel_tools=` | **solid** |
 | Wall-clock + per-tool timeouts | `timeout=`, `tool_timeout=` → `RunTimeout` | **solid** |
 | Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
@@ -289,10 +291,13 @@ server exposes it at `POST /run/stream` (SSE); the client consumes it via
           Model         Tools         A2A transport
         (backends)   (@tool fns)   (server · client)
               │
-   ┌──────────┼───────────┐
-   ▼          ▼           ▼
-Anthropic   Echo      Scripted
- (Claude)  (offline)  (testing)
+   ┌──────────┬──────────┬───────────┐
+   ▼          ▼          ▼           ▼
+Anthropic  OpenAI*    Echo      Scripted
+ (Claude)  (+compat) (offline)  (testing)
+
+* OpenAI backend works with any OpenAI-compatible endpoint (Azure, Together,
+  Groq, Ollama, vLLM, …) via base_url.
 ```
 
 | Module                | Responsibility                                        |

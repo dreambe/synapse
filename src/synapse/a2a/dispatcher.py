@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from ..messages import ImageBlock, TextBlock
+from ..messages import DocumentBlock, ImageBlock, TextBlock
 from ..streaming import RunComplete, TextDelta
 from . import jsonrpc
 from .spec import (
@@ -150,11 +150,16 @@ class A2ADispatcher:
         for part in msg.parts:
             if isinstance(part, TextPart):
                 blocks.append(TextBlock(part.text))
-            elif isinstance(part, FilePart) and (part.mime_type or "").startswith("image/"):
-                if part.bytes:
+            elif isinstance(part, FilePart):
+                is_image = (part.mime_type or "").startswith("image/")
+                if is_image and part.bytes:
                     blocks.append(ImageBlock(data=part.bytes, media_type=part.mime_type))
-                elif part.uri:
+                elif is_image and part.uri:
                     blocks.append(ImageBlock(url=part.uri))
+                elif part.bytes:
+                    blocks.append(DocumentBlock(data=part.bytes, media_type=part.mime_type))
+                elif part.uri:
+                    blocks.append(DocumentBlock(url=part.uri))
         if not blocks:
             return msg.text
         if len(blocks) == 1 and isinstance(blocks[0], TextBlock):

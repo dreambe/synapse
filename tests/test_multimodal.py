@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from synapse import Agent, ImageBlock, ScriptedModel, TextBlock, tool
-from synapse.messages import ToolResultBlock, message_from_dict
+from synapse import Agent, DocumentBlock, ImageBlock, ScriptedModel, TextBlock, tool
+from synapse.messages import Message, ToolResultBlock, message_from_dict
 from synapse.models.base import Model, ModelResponse
-from synapse.messages import Message
 
 
 class CaptureModel(Model):
@@ -124,3 +123,68 @@ async def test_a2a_image_filepart_maps_to_input():
     # the agent received a text + image input
     user_msg = model.seen[0][0]
     assert [p["type"] for p in user_msg["content"]] == ["text", "image"]
+
+
+# -- documents (PDF / text) -------------------------------------------------
+
+
+def test_document_pdf_wire_shape():
+    doc = DocumentBlock.from_base64("JVBERi0=", "application/pdf", title="r.pdf")
+    d = doc.to_dict()
+    assert d["type"] == "document"
+    assert d["source"] == {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0="}
+    assert d["title"] == "r.pdf"
+
+
+def test_document_text_and_url_shapes():
+    assert DocumentBlock.from_text("hello").to_dict()["source"] == {
+        "type": "text",
+        "media_type": "text/plain",
+        "data": "hello",
+    }
+    assert DocumentBlock.from_url("http://x/r.pdf").to_dict()["source"] == {
+        "type": "url",
+        "url": "http://x/r.pdf",
+    }
+
+
+def test_document_roundtrip():
+    msg = Message("user", [TextBlock("read"), DocumentBlock.from_base64("ZZ", title="t")])
+    back = message_from_dict(msg.to_dict())
+    assert isinstance(back.content[1], DocumentBlock)
+    assert back.content[1].title == "t"
+
+
+async def test_tool_can_return_document():
+    @tool
+    def fetch_doc() -> DocumentBlock:
+        """Return a document."""
+        return DocumentBlock.from_text("contents", title="d")
+
+    agent = Agent("d", model=ScriptedModel([[("fetch_doc", {})], "got it"]), tools=[fetch_doc])
+    result = await agent.arun("get")
+    trs = [b for m in result.messages for b in m.content if isinstance(b, ToolResultBlock)]
+    assert isinstance(trs[0].content[0], DocumentBlock)
+
+
+async def test_a2a_pdf_filepart_maps_to_document():
+    from synapse.a2a import A2ADispatcher
+    from synapse.a2a.spec import FilePart
+    from synapse.a2a.spec import Message as A2AMessage
+    from synapse.a2a.spec import TextPart
+
+    model = CaptureModel("read it")
+    disp = A2ADispatcher(Agent("v", model=model))
+    a2a_msg = A2AMessage(
+        role="user",
+        parts=[
+            TextPart("summarize"),
+            FilePart(name="r.pdf", mime_type="application/pdf", bytes="JVBER"),
+        ],
+    )
+    await disp.handle(
+        {"jsonrpc": "2.0", "id": 1, "method": "message/send",
+         "params": {"message": a2a_msg.to_dict()}}
+    )
+    user_msg = model.seen[0][0]
+    assert [p["type"] for p in user_msg["content"]] == ["text", "document"]

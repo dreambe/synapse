@@ -24,30 +24,56 @@ def deploy(service: str) -> str:
     ...
 ```
 
-## Multimodal (images)
+## Multimodal (images & documents)
 
-Pass images in as input, and let tools return them.
+Pass images and documents (PDF, text) as input, and let tools return them.
 
 ```python
-from synapse import ImageBlock, TextBlock
+from synapse import ImageBlock, DocumentBlock, TextBlock
 
-# Image input — pass a list of content blocks instead of a string:
+# Multimodal input — pass a list of content blocks instead of a string:
 agent.run([
-    TextBlock("What's in this image?"),
-    ImageBlock.from_file("photo.png"),            # or .from_base64(data, "image/png")
-])                                                # or .from_url("https://…/cat.png")
+    TextBlock("Summarize this and describe the chart."),
+    DocumentBlock.from_file("report.pdf"),        # or .from_base64/.from_url/.from_text
+    ImageBlock.from_file("chart.png"),            # or .from_base64(data, "image/png") / .from_url(...)
+])
 
-# A tool can return an image (or a list of text + images):
+# A tool can return an image or document (or a list of blocks):
 @tool
 def render_chart(spec: str) -> ImageBlock:
     "Render a chart and return it as a PNG."
     return ImageBlock.from_base64(png_b64, "image/png")
 ```
 
-Images serialize to the model's native image content blocks. Over A2A, an image
-`FilePart` (bytes or URI) in an incoming message maps to image input
-automatically. (Input guardrails apply to string input; for block-list input
-they're skipped.)
+Content serializes to the model's native blocks. Over A2A, an incoming
+`FilePart` maps to an `ImageBlock` (image mime types) or a `DocumentBlock`
+(everything else) automatically. (Input guardrails apply to string input; for
+block-list input they're skipped.)
+
+## Models & providers
+
+synapse is **provider-neutral**: the framework speaks its own message format and
+each backend translates. Pick a backend per agent:
+
+```python
+from synapse import Agent, AnthropicModel, OpenAIModel
+
+Agent("a", model=AnthropicModel("claude-opus-4-8"))           # default
+Agent("b", model=OpenAIModel("gpt-4o"))                       # OpenAI
+# Any OpenAI-compatible endpoint via base_url: Azure, Together, Groq, Ollama, vLLM…
+Agent("c", model=OpenAIModel("llama-3.1-70b",
+                             base_url="http://localhost:11434/v1", api_key="x"))
+```
+
+Resilience and fallback work across providers:
+
+```python
+from synapse import RetryModel
+model = RetryModel(OpenAIModel("gpt-4o"), fallbacks=[AnthropicModel("claude-opus-4-8")])
+```
+
+To support a provider with no OpenAI-compatible endpoint, implement the
+`Model` interface (`async def generate`, optional `stream`).
 
 ## RunContext
 
