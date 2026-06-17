@@ -45,6 +45,7 @@ class CaseResult:
     detail: str
     output: str
     tokens: int
+    stop_reason: str = "end_turn"
 
 
 @dataclass
@@ -88,20 +89,28 @@ async def _run_check(case: Case, result: RunResult) -> tuple[bool, str]:
     return True, "(no check)"
 
 
-async def aevaluate(agent, cases: list[Case]) -> Report:
-    """Run each case against ``agent`` and collect a :class:`Report`."""
+async def aevaluate(agent, cases: list[Case], *, run_kwargs: dict | None = None) -> Report:
+    """Run each case against ``agent`` and collect a :class:`Report`.
+
+    ``run_kwargs`` are default run options applied to every case (a case's own
+    ``run_kwargs`` override them) — used by Self-Harness to evaluate a harness's
+    run policy.
+    """
     results: list[CaseResult] = []
     for case in cases:
-        result = await agent.arun(case.input, **case.run_kwargs)
+        merged = {**(run_kwargs or {}), **case.run_kwargs}
+        result = await agent.arun(case.input, **merged)
         ok, detail = await _run_check(case, result)
         name = case.name or (case.input if isinstance(case.input, str) else "case")[:48]
-        results.append(CaseResult(name, ok, detail, result.output, result.usage.total_tokens))
+        results.append(
+            CaseResult(name, ok, detail, result.output, result.usage.total_tokens, result.stop_reason)
+        )
     return Report(results)
 
 
-def evaluate(agent, cases: list[Case]) -> Report:
+def evaluate(agent, cases: list[Case], *, run_kwargs: dict | None = None) -> Report:
     """Synchronous wrapper around :func:`aevaluate`."""
-    return run_sync(aevaluate(agent, cases))
+    return run_sync(aevaluate(agent, cases, run_kwargs=run_kwargs))
 
 
 # -- built-in checks --------------------------------------------------------

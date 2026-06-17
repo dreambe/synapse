@@ -10,6 +10,7 @@ anywhere — in-process, streaming, or over the **A2A protocol**.
 - [Getting started](getting-started.md) — install, your first agent, sync/async/streaming.
 - [Guide](guide.md) — tools, multimodal, `RunContext` options, memory, context compaction, hooks, guardrails, approval, verifier, routing, teams, resilience.
 - [Agent-to-agent (A2A)](a2a.md) — serve to / consume from the A2A ecosystem, push notifications.
+- [Self-Harness](self-harness.md) — a versioned harness that improves itself through a regression gate.
 
 ## The 60-second tour
 

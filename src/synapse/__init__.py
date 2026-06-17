@@ -30,6 +30,17 @@ from .errors import (
     SynapseError,
     ToolError,
 )
+from .harness import EDITABLE_SURFACES, Harness
+from .selfharness import (
+    EvidencePack,
+    EvolveResult,
+    HarnessEdit,
+    PromotionRecord,
+    classify_failure,
+    evolve,
+    mine_weaknesses,
+    model_proposer,
+)
 from .evaluation import (
     Case,
     CaseResult,
@@ -190,6 +201,17 @@ __all__ = [
     "TracingHooks",
     "OTelHooks",
     "Span",
+    # self-harness
+    "Harness",
+    "EDITABLE_SURFACES",
+    "HarnessEdit",
+    "EvidencePack",
+    "PromotionRecord",
+    "EvolveResult",
+    "evolve",
+    "mine_weaknesses",
+    "classify_failure",
+    "model_proposer",
     # context engineering
     "Compactor",
     "select_tools",

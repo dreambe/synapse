@@ -9,6 +9,14 @@ Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
 ### Added
+- **Self-Harness (experimental).** The harness becomes a versioned, declared
+  object (`Harness`) and improves itself through a regression-gated loop
+  (`evolve`): weakness mining over eval failures (`mine_weaknesses` /
+  `classify_failure`, reusing loop-engineering `stop_reason`s) → bounded, audited
+  edits to *declared* surfaces only (`HarnessEdit`; `model_proposer` emits them
+  as validated JSON) → promotion only if ≥1 split improves and **neither
+  regresses** (held-in / held-out via the eval harness). `aevaluate`/`evaluate`
+  gained `run_kwargs`; `CaseResult` now carries `stop_reason`.
 - **Code execution sandbox.** `code_execution_tool()` / `run_python()` run code
   in an isolated subprocess (fresh temp dir, minimal env, POSIX CPU/memory/output
   limits, hard timeout). Explicitly process isolation, **not** a security

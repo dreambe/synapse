@@ -55,7 +55,8 @@ Requires Python 3.10+.
 ## Documentation
 
 Full guides live in [`docs/`](docs/index.md): [getting started](docs/getting-started.md) ·
-[guide](docs/guide.md) (all run options) · [agent-to-agent](docs/a2a.md).
+[guide](docs/guide.md) (all run options) · [agent-to-agent](docs/a2a.md) ·
+[self-harness](docs/self-harness.md).
 
 ## Quick start
 
@@ -243,6 +244,7 @@ result = agent.run(
 | Structured outputs | `output_schema=` / `response_model=` → `RunResult.parsed` | **solid** |
 | Tool-input validation | `validate_tool_inputs=True` | **solid** |
 | Eval harness | `Case`, `evaluate`, `contains`/`llm_judge`/… | **solid** |
+| Self-Harness (versioned harness + regression-gated self-edit) | `Harness`, `evolve`, `model_proposer` | first cut *(experimental)* |
 | Tracing | `TracingHooks` (in-memory), `OTelHooks` (OpenTelemetry) | **solid** |
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
 | Multimodal (images & documents, in & out) | `ImageBlock`, `DocumentBlock` | **solid** |
@@ -321,6 +323,7 @@ Anthropic  OpenAI*    Echo      Scripted
 | `synapse.tracing`     | `TracingHooks` (in-memory) + `OTelHooks` (OpenTelemetry) |
 | `synapse.structured`  | JSON-Schema validation + structured-output parsing    |
 | `synapse.evaluation`  | Eval harness: `Case` / `evaluate` / checks / `llm_judge` |
+| `synapse.harness` / `synapse.selfharness` | Versioned `Harness` + mine→propose→promote loop |
 | `synapse.skill`       | Skills: `SKILL.md` folders, progressive disclosure    |
 | `synapse.sandbox`     | Code execution in a resource-limited subprocess       |
 | `synapse.memory`      | Cross-run `Memory` backends + auto memory tools       |
