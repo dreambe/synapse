@@ -246,6 +246,11 @@ result = agent.run(
 | Eval harness | `Case`, `evaluate`, `contains`/`llm_judge`/… | **solid** |
 | Self-Harness (versioned harness + regression-gated self-edit) | `Harness`, `evolve`, `model_proposer` | first cut *(experimental)* |
 | Tracing | `TracingHooks` (in-memory), `OTelHooks` (OpenTelemetry) | **solid** |
+| Explicit plan (decomposition + progress ledger) | `plan=True` → `write_plan`/`update_step`, `RunResult.plan` | **solid** |
+| Context offloading (large tool results) | `offload_over=`, `ResultStore`, `fetch_result` | **solid** |
+| Outcome verification (run tests/build) | `verify=command_verifier([...])` | **solid** |
+| Idempotent execution (no double side effects on replay) | `journal=`, `ExecutionJournal` | **solid** |
+| Run records (persisted fact source) | `RunRecorder`, `RunStore` | **solid** |
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
 | Multimodal (images & documents, in & out) | `ImageBlock`, `DocumentBlock` | **solid** |
 | Provider-neutral backends | `AnthropicModel`, `OpenAIModel` (+ any OpenAI-compatible) | **solid** |
@@ -342,9 +347,11 @@ Anthropic  OpenAI*    Echo      Scripted
 This is an experimental framework with a deliberate point of view, not a
 finished product. What it does **not** do yet (by design or as known debt):
 
-- **Checkpointing is not true durable execution.** It snapshots the message
-  transcript; resuming an interrupted run **replays tools** (not idempotent) and
-  doesn't recover a half-finished parallel tool batch atomically.
+- **Durability is per-tool-idempotent, not full durable execution.** A
+  `journal=` makes replaying an identical call sequence skip already-run tools
+  (no double side effects), and `checkpointer=` snapshots the transcript — but
+  there's no atomic recovery of a half-finished parallel tool batch or a
+  distributed execution graph.
 - **Some defaults are lexical, not semantic.** Tool search and the rule-based
   `Router` use keyword overlap (swap in an LLM/embeddings for nuance). Memory
   now has a semantic option (`VectorMemory` + an `Embedder`); the in-memory/file

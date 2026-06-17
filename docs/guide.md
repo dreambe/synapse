@@ -50,6 +50,55 @@ detection counts per *turn*, so legitimate parallel fan-out of identical calls
 in one turn does not trip it. For a verifiable "done" condition (not just "stop
 looping"), combine with `verify=`.
 
+## Long-horizon execution
+
+Treats context as the scarce resource and makes "done" mean *verified*.
+
+**Explicit plan** — give the agent a maintained to-do list (a context anchor +
+progress ledger), edited via `write_plan`/`update_step` and rendered into context
+every turn:
+
+```python
+result = agent.run("ship the feature", plan=True)
+result.plan        # the final Plan (steps + statuses)
+```
+
+**Offload large tool results** — don't dump a 50KB result into context. Over a
+threshold, the result is stored and replaced with a short preview + a reference;
+the agent pulls the full (or filtered) result on demand via `fetch_result`:
+
+```python
+agent.run("analyze the logs", offload_over=2000)         # in-memory store by default
+agent.run("...", offload_over=2000, result_store=FileResultStore("blobs"))
+```
+
+**Outcome verification** — verify by *running a check* (tests/build), not by
+reading the final text; failures feed back and the agent iterates:
+
+```python
+from synapse import command_verifier
+agent.run("fix the bug", verify=command_verifier(["pytest", "-q"]), max_verify_rounds=3)
+# stop_reason == "verified" only if the command exits 0
+```
+
+**Idempotent execution** — with a journal + `run_id`, a replay (after a crash)
+returns recorded tool results instead of re-firing side effects:
+
+```python
+from synapse import FileJournal
+agent.run("send the invoices", journal=FileJournal("runs/job-42.json"), run_id="job-42")
+```
+
+**Run records (fact source)** — persist the full trajectory for audit, debugging,
+and Self-Harness weakness mining:
+
+```python
+from synapse import RunRecorder, FileRunStore
+store = FileRunStore("runs")
+agent.run("...", hooks=RunRecorder(store))
+await store.list()        # input, output, stop_reason, usage, full messages
+```
+
 ## Structured outputs
 
 Get typed, validated results — not just free text — so an agent can feed

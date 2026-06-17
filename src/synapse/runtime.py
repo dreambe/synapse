@@ -33,6 +33,7 @@ from typing import (
 from ._util import maybe_await
 from .errors import SynapseError
 from .guardrails import Guardrail, apply_guardrails
+from .journal import ExecutionJournal, call_key
 from .messages import (
     DocumentBlock,
     ImageBlock,
@@ -42,6 +43,8 @@ from .messages import (
     ToolUseBlock,
 )
 from .observability import Hooks, Usage
+from .plan import Plan, plan_tools
+from .results import InMemoryResultStore, ResultStore, make_preview
 from .streaming import ModelStreamEnd, RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
 from .structured import (
     instantiate,
@@ -114,6 +117,7 @@ class RunResult:
     usage: Usage = field(default_factory=Usage)
     verify_rounds: int = 1
     parsed: Any = None
+    plan: Optional[Plan] = None
 
 
 @dataclass
@@ -147,6 +151,11 @@ class RunContext:
     max_repeated_tool_calls: Optional[int] = None
     max_consecutive_tool_errors: Optional[int] = None
     max_no_progress: Optional[int] = None
+    # Context offloading, idempotency, explicit plan.
+    result_store: Optional[ResultStore] = None
+    offload_over: Optional[int] = None
+    journal: Optional[ExecutionJournal] = None
+    plan: Optional[Plan] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -259,15 +268,53 @@ def _make_search_tool(agent: "Agent", active: set[str]) -> Tool:
     )
 
 
+def _make_fetch_tool(store: ResultStore) -> Tool:
+    async def fetch_result(ref: str, contains: str = "", max_chars: int = 4000) -> str:
+        text = await store.get(ref)
+        if text is None:
+            return f"no offloaded result named {ref!r}"
+        if contains:
+            hits = [ln for ln in text.splitlines() if contains.lower() in ln.lower()]
+            return "\n".join(hits[:200]) if hits else f"no lines contain {contains!r}"
+        return text[:max_chars]
+
+    return Tool(
+        name="fetch_result",
+        description="Read an offloaded tool result by reference; optionally filter by substring.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string", "description": "The result reference (res_...)."},
+                "contains": {"type": "string", "description": "Only return matching lines."},
+                "max_chars": {"type": "integer", "description": "Max chars when not filtering."},
+            },
+            "required": ["ref"],
+        },
+        func=fetch_result,
+    )
+
+
 async def _execute_tool_use(
     ctx: RunContext,
     tool_map: dict[str, Tool],
     block: ToolUseBlock,
     sem: Optional[asyncio.Semaphore],
+    ordinal: int = 0,
 ) -> ToolResultBlock:
     impl = tool_map.get(block.name)
     if impl is None:
         return ToolResultBlock(block.id, f"Error: no tool named {block.name!r}", is_error=True)
+
+    # Idempotency: replay a recorded result instead of re-running the side effect.
+    journal_key: Optional[str] = None
+    if ctx.journal is not None and ctx.run_id is not None:
+        journal_key = call_key(ctx.run_id, block.name, block.input, ordinal)
+        recorded = await ctx.journal.lookup(journal_key)
+        if recorded is not None:
+            await _emit(ctx, "on_tool_start", block.name, block.input)
+            out = ToolResultBlock(block.id, recorded["content"], is_error=recorded["is_error"])
+            await _emit(ctx, "on_tool_end", block.name, out.content, out.is_error)
+            return out
 
     if ctx.validate_tool_inputs:
         errs = validate_json(block.input, impl.parameters)
@@ -298,6 +345,21 @@ async def _execute_tool_use(
         )
     except Exception as exc:  # tools surface failures back to the model
         out = ToolResultBlock(block.id, f"Error ({type(exc).__name__}): {exc}", is_error=True)
+
+    # Offload large text results to keep the context window lean.
+    if (
+        ctx.offload_over is not None
+        and ctx.result_store is not None
+        and not out.is_error
+        and isinstance(out.content, str)
+        and len(out.content) > ctx.offload_over
+    ):
+        ref = await ctx.result_store.put(out.content)
+        out = ToolResultBlock(block.id, make_preview(out.content, ref))
+
+    if journal_key is not None and ctx.journal is not None and isinstance(out.content, str):
+        await ctx.journal.record(journal_key, {"content": out.content, "is_error": out.is_error})
+
     await _emit(ctx, "on_tool_end", block.name, out.content, out.is_error)
     return out
 
@@ -314,31 +376,44 @@ async def _drive_stream(
     sem = asyncio.Semaphore(ctx.max_parallel_tools) if ctx.max_parallel_tools else None
     loop = asyncio.get_running_loop()
 
+    # Always-exposed builtin tools: plan management, offloaded-result fetch.
+    builtins: list[Tool] = []
+    if ctx.plan is not None:
+        builtins += plan_tools(ctx.plan)
+    if ctx.offload_over is not None and ctx.result_store is not None:
+        builtins.append(_make_fetch_tool(ctx.result_store))
+
     def exposed_tools() -> list[Tool]:
-        if search_tool is None:
-            return agent.tools
-        return [search_tool, *[t for t in agent.tools if t.name in active]]
+        base = (
+            agent.tools
+            if search_tool is None
+            else [search_tool, *[t for t in agent.tools if t.name in active]]
+        )
+        return [*builtins, *base]
 
     def tool_map() -> dict[str, Tool]:
-        if search_tool is None:
-            return base_map
-        return {search_tool.name: search_tool, **base_map}
+        m = {t.name: t for t in builtins}
+        m.update(base_map)
+        if search_tool is not None:
+            m[search_tool.name] = search_tool
+        return m
 
-    system = agent.instructions
+    system_static = agent.instructions
     if ctx.grounding_context:
-        system = (
-            system
+        system_static = (
+            system_static
             + "\n\n# Business context (from the knowledge graph)\n"
             + ctx.grounding_context
         ).strip()
     if ctx.output_schema:
-        system = (system + "\n\n" + schema_instruction(ctx.output_schema)).strip()
+        system_static = (system_static + "\n\n" + schema_instruction(ctx.output_schema)).strip()
 
     # Loop-engineering guard state (across iterations).
     call_turns: dict[tuple, int] = {}
     consecutive_errors = 0
     last_turn_sig: Optional[tuple] = None
     no_progress = 0
+    executed = 0  # global tool-call ordinal, for idempotency keys
 
     iterations = 0
     for iterations in range(1, ctx.max_iterations + 1):
@@ -347,6 +422,15 @@ async def _drive_stream(
 
         if ctx.compactor is not None:
             messages[:] = await ctx.compactor.maybe_compact(messages)
+
+        # The plan is a live context anchor — render it fresh each turn.
+        system = system_static
+        if ctx.plan is not None:
+            system = (
+                system_static
+                + "\n\n# Plan (keep it current with write_plan / update_step)\n"
+                + ctx.plan.render()
+            )
 
         response = None
         async for chunk in agent.model.stream(
@@ -397,9 +481,14 @@ async def _drive_stream(
         for block in uses:
             yield ToolCall(id=block.id, name=block.name, input=block.input)
 
+        tmap = tool_map()
         results = await asyncio.gather(
-            *(_execute_tool_use(ctx, tool_map(), block, sem) for block in uses)
+            *(
+                _execute_tool_use(ctx, tmap, block, sem, executed + i)
+                for i, block in enumerate(uses)
+            )
         )
+        executed += len(uses)
         for r in results:
             yield ToolOutput(
                 id=r.tool_use_id, name="", content=_content_text(r.content), is_error=r.is_error
@@ -469,6 +558,8 @@ async def arun_stream(
     ctx = context or RunContext()
     if ctx.response_model is not None and ctx.output_schema is None:
         ctx.output_schema = model_schema(ctx.response_model)
+    if ctx.offload_over is not None and ctx.result_store is None:
+        ctx.result_store = InMemoryResultStore()
     loop = asyncio.get_running_loop()
     deadline = loop.time() + ctx.timeout if ctx.timeout else None
 
@@ -519,6 +610,7 @@ async def arun_stream(
             usage=ctx.usage,
             verify_rounds=rounds,
             parsed=parsed,
+            plan=ctx.plan,
         )
         await _emit(ctx, "on_run_end", result)
         yield RunComplete(result=result)

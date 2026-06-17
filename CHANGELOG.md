@@ -17,6 +17,21 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Long-horizon execution (first-principles fixes).**
+  - *Explicit plan* — `plan=True` gives the agent a maintained to-do list
+    (`write_plan`/`update_step`), rendered into context every turn and surfaced
+    on `RunResult.plan`. Decomposition becomes a tracked artifact, not a hope.
+  - *Context offloading* — `offload_over=` moves large tool results to a
+    `ResultStore`, leaving a preview + reference in context; the agent pulls the
+    full/filtered result via the `fetch_result` tool. Context is treated as the
+    scarce resource it is.
+  - *Outcome verification* — `command_verifier([...])` makes `verify=` run a
+    real check (tests/build); failures feed back and the agent iterates.
+  - *Idempotent execution* — `journal=` + `run_id` replay recorded tool results
+    instead of re-firing side effects on a retry/resume (`ExecutionJournal`,
+    in-memory/file).
+  - *Run records* — `RunRecorder` + `RunStore` persist the full trajectory
+    (input/output/usage/messages/stop reason) as a queryable fact source.
 - **Multi-tenant isolation.** `MemoryNamespace` (`InMemoryNamespace` /
   `FileNamespace` / `VectorNamespace`) hands out an **isolated `Memory` per
   scope** (tenant/user) — `ns.scope("alice")` can never recall

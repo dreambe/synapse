@@ -17,6 +17,7 @@ from .guardrails import Guardrail
 from .memory import Memory, memory_tools
 from .models import Model, default_model
 from .observability import Hooks
+from .plan import Plan as _Plan
 from .skill import Skill, skill_catalog, skill_tools
 from .runtime import (
     ApprovalCallback,
@@ -117,6 +118,10 @@ class Agent:
             max_repeated_tool_calls=opts.get("max_repeated_tool_calls"),
             max_consecutive_tool_errors=opts.get("max_consecutive_tool_errors"),
             max_no_progress=opts.get("max_no_progress"),
+            plan=_Plan() if opts.get("plan") else None,
+            offload_over=opts.get("offload_over"),
+            result_store=opts.get("result_store"),
+            journal=opts.get("journal"),
             tool_search=(
                 self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
             ),
@@ -149,6 +154,10 @@ class Agent:
         max_repeated_tool_calls: int | None = None,
         max_consecutive_tool_errors: int | None = None,
         max_no_progress: int | None = None,
+        plan: bool = False,
+        offload_over: int | None = None,
+        result_store: object | None = None,
+        journal: object | None = None,
         tool_search: bool | None = None,
     ) -> RunResult:
         """Run this agent to completion (async). The canonical, typed entry point."""
@@ -175,6 +184,10 @@ class Agent:
             max_repeated_tool_calls=max_repeated_tool_calls,
             max_consecutive_tool_errors=max_consecutive_tool_errors,
             max_no_progress=max_no_progress,
+            plan=plan,
+            offload_over=offload_over,
+            result_store=result_store,
+            journal=journal,
             tool_search=tool_search,
         )
         return await arun_agent(self, user_input, session=session, context=ctx)

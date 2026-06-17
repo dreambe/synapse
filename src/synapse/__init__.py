@@ -32,6 +32,17 @@ from .errors import (
 )
 from .harness import EDITABLE_SURFACES, Harness
 from .human import CallbackChannel, HumanChannel, human_tool
+from .journal import ExecutionJournal, FileJournal, InMemoryJournal
+from .plan import Plan, PlanStep, plan_tools
+from .recording import (
+    FileRunStore,
+    InMemoryRunStore,
+    RunRecord,
+    RunRecorder,
+    RunStore,
+)
+from .results import FileResultStore, InMemoryResultStore, ResultStore
+from .verifiers import command_verifier
 from .selfharness import (
     EvidencePack,
     EvolveResult,
@@ -215,6 +226,26 @@ __all__ = [
     "HumanChannel",
     "CallbackChannel",
     "human_tool",
+    # plan / decomposition
+    "Plan",
+    "PlanStep",
+    "plan_tools",
+    # context offloading
+    "ResultStore",
+    "InMemoryResultStore",
+    "FileResultStore",
+    # idempotent execution
+    "ExecutionJournal",
+    "InMemoryJournal",
+    "FileJournal",
+    # outcome verification
+    "command_verifier",
+    # run records (fact source)
+    "RunRecord",
+    "RunStore",
+    "InMemoryRunStore",
+    "FileRunStore",
+    "RunRecorder",
     # self-harness
     "Harness",
     "EDITABLE_SURFACES",
