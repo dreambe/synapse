@@ -64,11 +64,15 @@ from .guardrails import (
 from .memory import (
     Embedder,
     FileMemory,
+    FileNamespace,
     HashingEmbedder,
     InMemoryMemory,
+    InMemoryNamespace,
     Memory,
+    MemoryNamespace,
     OpenAIEmbedder,
     VectorMemory,
+    VectorNamespace,
     memory_tools,
 )
 from .messages import (
@@ -164,6 +168,11 @@ __all__ = [
     "HashingEmbedder",
     "OpenAIEmbedder",
     "memory_tools",
+    # memory isolation (per tenant/user)
+    "MemoryNamespace",
+    "InMemoryNamespace",
+    "FileNamespace",
+    "VectorNamespace",
     # sandbox
     "run_python",
     "code_execution_tool",

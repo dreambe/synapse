@@ -90,3 +90,34 @@ offline end-to-end version (fake KG + a callback "human").
 > The agent is only as grounded as the KG it queries and only as safe as the red
 > lines it's told. Grounding and escalation are *mechanisms*; the quality of the
 > business knowledge and the tool descriptions is what makes the agent smart.
+
+## Multi-tenant isolation (sessions & memory)
+
+When one agent serves many users/tenants, two things must not leak across them:
+
+**Conversation history** — give each (tenant/user, conversation) its **own**
+`Session`; never share one. The per-session lock and history are then naturally
+isolated. Record the owner on `Session(scope=...)` for routing/audit. Over A2A,
+key sessions by an unguessable, tenant-scoped `session_id`.
+
+**Memory** — a single shared `Memory` would let one user's `recall` surface
+another's facts. Use a `MemoryNamespace` to hand out an isolated store per
+scope:
+
+```python
+from synapse import InMemoryNamespace, FileNamespace, VectorNamespace, HashingEmbedder
+
+ns = FileNamespace("memory")                       # or InMemory / Vector namespace
+# build the agent (or just its memory) per user — scopes are disjoint:
+agent = Agent("assistant", memory=ns.scope(user_id), tools=[...])
+```
+
+`ns.scope(key)` returns the same store for the same key and a disjoint store for
+different keys — so `ns.scope("alice")` can never recall `ns.scope("bob")`'s
+facts. `FileNamespace` sanitizes the key into a flat per-scope file (no path
+traversal). For semantic memory, `VectorNamespace(embedder)` partitions the
+vector index per scope.
+
+> Isolation is structural: distinct `Session` objects and distinct memory scopes.
+> The framework gives you the partitions; deriving the scope key from your authn
+> (tenant/user id) is your call — don't derive it from anything user-controllable.

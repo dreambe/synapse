@@ -256,6 +256,7 @@ result = agent.run(
 | Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | **solid** |
 | Knowledge grounding (KG/RAG preflight) | `grounding=` → injected business context | **solid** |
 | Human escalation (ask a person) | `human_tool(channel)`, `HumanChannel`/`CallbackChannel` | **solid** |
+| Multi-tenant isolation (session + memory) | per-`Session` history, `MemoryNamespace.scope(key)` | **solid** |
 | Verifier loop (iterate-until-pass) | `verify=` → `Verdict` | **solid** |
 | Guardrails | `input_guardrails=` / `output_guardrails=` | **solid** |
 | Resilience (transient vs permanent) | `RetryModel(model, fallbacks=[...], retry_on=...)` | **solid** |

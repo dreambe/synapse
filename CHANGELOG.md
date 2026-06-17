@@ -17,6 +17,13 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Multi-tenant isolation.** `MemoryNamespace` (`InMemoryNamespace` /
+  `FileNamespace` / `VectorNamespace`) hands out an **isolated `Memory` per
+  scope** (tenant/user) — `ns.scope("alice")` can never recall
+  `ns.scope("bob")`'s facts; `FileNamespace` sanitizes the scope key (no path
+  traversal). Closes a real leak: a single shared memory previously let one
+  user's `recall` see another's. `Session` gained a `scope` field; conversation
+  isolation is distinct `Session` objects per (tenant, conversation).
 - **Enterprise knowledge grounding + human escalation.** `grounding=` runs a
   preflight provider (e.g. an MCP-backed knowledge graph) before the loop and
   injects the result as business context, so the agent knows *which repo /

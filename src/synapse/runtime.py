@@ -87,9 +87,15 @@ Verifier = Callable[[str], Union[bool, Verdict, Awaitable[Any]]]
 @dataclass
 class Session:
     """Conversation history across turns. A per-session lock serializes turns
-    on the same session; distinct sessions run fully in parallel."""
+    on the same session; distinct sessions run fully in parallel.
+
+    Isolation: give each (tenant/user, conversation) its **own** Session —
+    never share one across users. ``scope`` records the owning tenant/user for
+    routing and audit (it does not by itself enforce isolation; distinct
+    objects do)."""
 
     messages: list[Message] = field(default_factory=list)
+    scope: Optional[str] = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def extend(self, messages: list[Message]) -> None:

@@ -199,6 +199,64 @@ class VectorMemory(Memory):
         return [it.text for it in self._items]
 
 
+def _safe_key(key: str) -> str:
+    safe = "".join(c for c in key if c.isalnum() or c in ("-", "_", "."))
+    while ".." in safe:
+        safe = safe.replace("..", ".")
+    safe = safe.strip(".")
+    return safe[:128] or "default"
+
+
+class MemoryNamespace(ABC):
+    """Hands out an isolated :class:`Memory` per scope (tenant / user / session).
+
+    The same key always returns the same store; different keys are disjoint —
+    so one user's ``recall`` never sees another's facts. Use this whenever one
+    agent serves multiple tenants or users.
+    """
+
+    @abstractmethod
+    def scope(self, key: str) -> Memory: ...
+
+
+class InMemoryNamespace(MemoryNamespace):
+    """Process-local, scope-partitioned memory."""
+
+    def __init__(self) -> None:
+        self._scopes: dict[str, InMemoryMemory] = {}
+
+    def scope(self, key: str) -> Memory:
+        return self._scopes.setdefault(key, InMemoryMemory())
+
+
+class FileNamespace(MemoryNamespace):
+    """One JSONL file per scope under ``directory`` (survives restarts)."""
+
+    def __init__(self, directory: str | Path) -> None:
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self._scopes: dict[str, FileMemory] = {}
+
+    def scope(self, key: str) -> Memory:
+        if key not in self._scopes:
+            self._scopes[key] = FileMemory(self.directory / f"{_safe_key(key)}.jsonl")
+        return self._scopes[key]
+
+
+class VectorNamespace(MemoryNamespace):
+    """Scope-partitioned semantic memory sharing one embedder."""
+
+    def __init__(self, embedder: "Embedder", *, min_score: float = 0.0) -> None:
+        self.embedder = embedder
+        self.min_score = min_score
+        self._scopes: dict[str, VectorMemory] = {}
+
+    def scope(self, key: str) -> Memory:
+        if key not in self._scopes:
+            self._scopes[key] = VectorMemory(self.embedder, min_score=self.min_score)
+        return self._scopes[key]
+
+
 def memory_tools(memory: Memory) -> list[Tool]:
     """Build ``remember``/``recall`` tools backed by ``memory``."""
 
