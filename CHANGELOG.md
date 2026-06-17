@@ -17,6 +17,13 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Enterprise knowledge grounding + human escalation.** `grounding=` runs a
+  preflight provider (e.g. an MCP-backed knowledge graph) before the loop and
+  injects the result as business context, so the agent knows *which repo /
+  scope / red lines* while decomposing the task; the KG's own MCP tools cover
+  ad-hoc mid-task questions. `human_tool(channel)` + `HumanChannel` /
+  `CallbackChannel` let the agent escalate to a person (e.g. a Feishu bot) when
+  blocked, with the reply flowing back into the run.
 - **Self-Harness (experimental).** The harness becomes a versioned, declared
   object (`Harness`) and improves itself through a regression-gated loop
   (`evolve`): weakness mining over eval failures (`mine_weaknesses` /

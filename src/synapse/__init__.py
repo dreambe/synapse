@@ -31,6 +31,7 @@ from .errors import (
     ToolError,
 )
 from .harness import EDITABLE_SURFACES, Harness
+from .human import CallbackChannel, HumanChannel, human_tool
 from .selfharness import (
     EvidencePack,
     EvolveResult,
@@ -201,6 +202,10 @@ __all__ = [
     "TracingHooks",
     "OTelHooks",
     "Span",
+    # human-in-the-loop assistance
+    "HumanChannel",
+    "CallbackChannel",
+    "human_tool",
     # self-harness
     "Harness",
     "EDITABLE_SURFACES",

@@ -56,7 +56,7 @@ Requires Python 3.10+.
 
 Full guides live in [`docs/`](docs/index.md): [getting started](docs/getting-started.md) ·
 [guide](docs/guide.md) (all run options) · [agent-to-agent](docs/a2a.md) ·
-[self-harness](docs/self-harness.md).
+[self-harness](docs/self-harness.md) · [enterprise knowledge & escalation](docs/enterprise.md).
 
 ## Quick start
 
@@ -254,6 +254,8 @@ result = agent.run(
 | Loop control (loop detection / no-progress / circuit breaker) | `max_repeated_tool_calls=`, `max_no_progress=`, `max_consecutive_tool_errors=` | **solid** |
 | Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
 | Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | **solid** |
+| Knowledge grounding (KG/RAG preflight) | `grounding=` → injected business context | **solid** |
+| Human escalation (ask a person) | `human_tool(channel)`, `HumanChannel`/`CallbackChannel` | **solid** |
 | Verifier loop (iterate-until-pass) | `verify=` → `Verdict` | **solid** |
 | Guardrails | `input_guardrails=` / `output_guardrails=` | **solid** |
 | Resilience (transient vs permanent) | `RetryModel(model, fallbacks=[...], retry_on=...)` | **solid** |

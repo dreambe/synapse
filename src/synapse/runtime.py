@@ -129,6 +129,11 @@ class RunContext:
     checkpointer: Optional["Checkpointer"] = None
     run_id: Optional[str] = None
     tool_search: bool = False
+    # Preflight grounding: query an enterprise KG / RAG source before planning;
+    # the returned text is injected as business context. `grounding_context` is
+    # the resolved result (set internally).
+    grounding: Optional[Callable[[str], Any]] = None
+    grounding_context: Optional[str] = None
     output_schema: Optional[dict] = None
     response_model: Optional[type] = None
     validate_tool_inputs: bool = False
@@ -314,6 +319,12 @@ async def _drive_stream(
         return {search_tool.name: search_tool, **base_map}
 
     system = agent.instructions
+    if ctx.grounding_context:
+        system = (
+            system
+            + "\n\n# Business context (from the knowledge graph)\n"
+            + ctx.grounding_context
+        ).strip()
     if ctx.output_schema:
         system = (system + "\n\n" + schema_instruction(ctx.output_schema)).strip()
 
@@ -456,6 +467,8 @@ async def arun_stream(
     deadline = loop.time() + ctx.timeout if ctx.timeout else None
 
     await _emit(ctx, "on_run_start", agent.name, _render_input(user_input))
+    if ctx.grounding is not None and ctx.grounding_context is None:
+        ctx.grounding_context = await maybe_await(ctx.grounding(_render_input(user_input)))
     if isinstance(user_input, str):
         user_content: Any = await apply_guardrails(user_input, ctx.input_guardrails)
     else:
