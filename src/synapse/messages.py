@@ -11,7 +11,7 @@ import base64
 import mimetypes
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 
 @dataclass
@@ -140,7 +140,7 @@ class ToolResultBlock:
     """
 
     tool_use_id: str
-    content: "Union[str, list[Block]]"
+    content: "Union[str, list[Any]]"
     is_error: bool = False
     type: str = field(default="tool_result", init=False)
 
@@ -169,7 +169,7 @@ class Message:
     """
 
     role: str
-    content: list[Block]
+    content: "Union[str, list[Any]]"
 
     def __post_init__(self) -> None:
         if isinstance(self.content, str):
@@ -185,7 +185,8 @@ class Message:
         return [b for b in self.content if isinstance(b, ToolUseBlock)]
 
     def to_dict(self) -> dict:
-        return {"role": self.role, "content": [b.to_dict() for b in self.content]}
+        blocks = [TextBlock(self.content)] if isinstance(self.content, str) else self.content
+        return {"role": self.role, "content": [b.to_dict() for b in blocks]}
 
 
 def _block_from_dict(data: dict) -> Block:

@@ -159,7 +159,7 @@ class AgentServer:
         self._httpd = ThreadingHTTPServer(
             (host, port), _make_handler(agent, self._sessions, self._loop)
         )
-        self.host, self.port = self._httpd.server_address[0], self._httpd.server_address[1]
+        self.host, self.port = str(self._httpd.server_address[0]), int(self._httpd.server_address[1])
         self._thread: threading.Thread | None = None
 
     @property

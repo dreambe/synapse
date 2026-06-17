@@ -25,6 +25,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 pytest          # the suite is fully offline — no API key required
 ruff check src tests examples
+mypy            # type-check (synapse ships py.typed; keep it honest)
 ```
 
 ## Tests

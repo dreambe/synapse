@@ -8,6 +8,14 @@ pre-1.0 and experimental; the API may change between minor versions.
 Focus of this release: **depth and honesty over breadth.** Deepen the three
 real frontier gaps, govern concurrency, and stop overselling.
 
+### Changed
+- **Type-checked.** Added `mypy` to the dev deps and CI (it ran clean across all
+  41 modules). synapse shipped a `py.typed` marker but had never been type-checked
+  — closing that integrity gap. Fixes along the way: `Message`/`ToolResultBlock`
+  `content` now honestly typed `str | list` (the constructor's str shorthand was
+  a lie in the annotation); runtime `user_input` typed `str | list` for
+  multimodal input; server host/port coerced to `str`/`int`.
+
 ### Added
 - **Self-Harness (experimental).** The harness becomes a versioned, declared
   object (`Harness`) and improves itself through a regression-gated loop

@@ -442,7 +442,7 @@ async def _verify_stream(
 
 async def arun_stream(
     agent: "Agent",
-    user_input: str,
+    user_input: "str | list",
     *,
     session: Session | None = None,
     context: RunContext | None = None,
@@ -515,7 +515,7 @@ async def arun_stream(
 
 async def arun_agent(
     agent: "Agent",
-    user_input: str,
+    user_input: "str | list",
     *,
     max_iterations: int = 12,
     session: Session | None = None,
@@ -544,7 +544,7 @@ async def arun_agent(
 
 def run_agent(
     agent: "Agent",
-    user_input: str,
+    user_input: "str | list",
     *,
     max_iterations: int = 12,
     session: Session | None = None,

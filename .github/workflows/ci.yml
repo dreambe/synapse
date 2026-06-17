@@ -28,6 +28,9 @@ jobs:
       - name: Lint (ruff)
         run: ruff check src tests examples
 
+      - name: Type check (mypy)
+        run: mypy
+
       - name: Test (pytest)
         run: pytest -q
 

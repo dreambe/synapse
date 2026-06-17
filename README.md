@@ -366,7 +366,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what landed when.
 ```bash
 pip install -e ".[dev]"
 pytest          # the suite runs fully offline (no API key needed)
-ruff check .
+ruff check src tests examples
+mypy            # type-checked: synapse ships a py.typed marker
 ```
 
 ## License
