@@ -1,0 +1,765 @@
+"""The agent loop.
+
+Streaming is the primitive: :func:`arun_stream` drives the model/tool loop and
+yields events; the non-streaming :func:`arun_agent` simply consumes that stream
+to its final :class:`RunResult`. One loop, one source of truth.
+
+Capabilities are threaded through a single :class:`RunContext` (the canonical
+configuration object — the keyword arguments on :meth:`Agent.run` are sugar
+over it): observability hooks, tool approval (HITL), guardrails, a verifier
+(iterate-until-pass), token budgets, wall-clock + per-tool timeouts, bounded
+tool concurrency, context compaction, checkpointing, and tool search.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import threading
+from dataclasses import dataclass, field
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Optional,
+    TypeVar,
+    Union,
+)
+
+from ._util import maybe_await
+from .errors import SynapseError
+from .guardrails import Guardrail, apply_guardrails
+from .journal import ExecutionJournal, call_key
+from .messages import (
+    DocumentBlock,
+    ImageBlock,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+from .observability import Hooks, Usage
+from .plan import Plan, plan_tools
+from .results import InMemoryResultStore, ResultStore, make_preview
+from .streaming import (
+    ModelStreamEnd,
+    RunComplete,
+    RunEvent,
+    Steered,
+    TextDelta,
+    ToolCall,
+    ToolOutput,
+)
+from .structured import (
+    instantiate,
+    model_schema,
+    parse_output,
+    schema_instruction,
+    validate_json,
+)
+from .tool import Tool
+
+if TYPE_CHECKING:  # avoid circular imports at runtime
+    from .agent import Agent
+    from .checkpoint import Checkpointer
+    from .context import Compactor
+    from .permissions import PermissionPolicy
+    from .steering import Steer
+
+_T = TypeVar("_T")
+
+
+class RunTimeout(SynapseError):
+    """Raised when a run exceeds its wall-clock ``timeout``."""
+
+
+@dataclass
+class ApprovalDecision:
+    """Result of a human-in-the-loop approval check."""
+
+    allow: bool
+    reason: str = ""
+
+
+@dataclass
+class Verdict:
+    """Result of a verifier check on an agent's output."""
+
+    passed: bool
+    feedback: str = ""
+
+
+ApprovalCallback = Callable[[str, dict], Union[bool, ApprovalDecision, Awaitable[Any]]]
+Verifier = Callable[[str], Union[bool, Verdict, Awaitable[Any]]]
+
+
+@dataclass
+class Session:
+    """Conversation history across turns. A per-session lock serializes turns
+    on the same session; distinct sessions run fully in parallel.
+
+    Isolation: give each (tenant/user, conversation) its **own** Session —
+    never share one across users. ``scope`` records the owning tenant/user for
+    routing and audit (it does not by itself enforce isolation; distinct
+    objects do)."""
+
+    messages: list[Message] = field(default_factory=list)
+    scope: Optional[str] = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+    def extend(self, messages: list[Message]) -> None:
+        self.messages = list(messages)
+
+
+@dataclass
+class RunResult:
+    """The outcome of running an agent once."""
+
+    output: str
+    messages: list[Message]
+    agent: str
+    iterations: int
+    stop_reason: str = "end_turn"
+    usage: Usage = field(default_factory=Usage)
+    verify_rounds: int = 1
+    parsed: Any = None
+    plan: Optional[Plan] = None
+
+
+@dataclass
+class RunContext:
+    """The canonical run configuration. All capabilities live here."""
+
+    max_iterations: int = 12
+    hooks: Optional[Hooks] = None
+    approval: Optional[ApprovalCallback] = None
+    verify: Optional[Verifier] = None
+    max_verify_rounds: int = 3
+    token_budget: Optional[int] = None
+    timeout: Optional[float] = None
+    tool_timeout: Optional[float] = None
+    max_parallel_tools: Optional[int] = None
+    input_guardrails: list[Guardrail] = field(default_factory=list)
+    output_guardrails: list[Guardrail] = field(default_factory=list)
+    compactor: Optional["Compactor"] = None
+    checkpointer: Optional["Checkpointer"] = None
+    run_id: Optional[str] = None
+    tool_search: bool = False
+    # Preflight grounding: query an enterprise KG / RAG source before planning;
+    # the returned text is injected as business context. `grounding_context` is
+    # the resolved result (set internally).
+    grounding: Optional[Callable[[str], Any]] = None
+    grounding_context: Optional[str] = None
+    output_schema: Optional[dict] = None
+    response_model: Optional[type] = None
+    validate_tool_inputs: bool = False
+    # Loop engineering: stopping guards beyond max_iterations.
+    max_repeated_tool_calls: Optional[int] = None
+    max_consecutive_tool_errors: Optional[int] = None
+    max_no_progress: Optional[int] = None
+    # Context offloading, idempotency, explicit plan.
+    result_store: Optional[ResultStore] = None
+    offload_over: Optional[int] = None
+    journal: Optional[ExecutionJournal] = None
+    plan: Optional[Plan] = None
+    # Mid-run steering: inject guidance / request a graceful stop at turn bounds.
+    steer: Optional["Steer"] = None
+    # Structured permission policy (read-only/plan, ask, auto, bypass).
+    permissions: Optional["PermissionPolicy"] = None
+    usage: Usage = field(default_factory=Usage)
+
+
+@dataclass
+class _TurnInfo:
+    """Internal sentinel ending a drive stream."""
+
+    iterations: int
+    stop_reason: str
+    verify_rounds: int = 1
+
+
+def run_sync(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run a coroutine to completion from synchronous code, anywhere.
+
+    Caveat: when called from *inside* a running event loop this spins up a
+    separate loop in a worker thread, so resources bound to the parent loop
+    (clients, pools) are not shared. Prefer the async API in async code.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    box: dict[str, Any] = {}
+
+    def _runner() -> None:
+        box["value"] = asyncio.run(coro)
+
+    thread = threading.Thread(target=_runner)
+    thread.start()
+    thread.join()
+    return box["value"]
+
+
+async def _emit(ctx: RunContext, method: str, *args: Any) -> None:
+    if ctx.hooks is not None:
+        await maybe_await(getattr(ctx.hooks, method)(*args))
+
+
+def _normalize_approval(value: Any) -> ApprovalDecision:
+    return value if isinstance(value, ApprovalDecision) else ApprovalDecision(allow=bool(value))
+
+
+_BLOCK_TYPES = (TextBlock, ImageBlock, DocumentBlock, ToolUseBlock, ToolResultBlock)
+
+
+def _tool_result_content(result: Any):
+    """Coerce a tool's return value into tool_result content.
+
+    Rich returns (an ``ImageBlock``, or a list of content blocks) pass through
+    for multimodal results; everything else is stringified.
+    """
+    if result is None:
+        return ""
+    if isinstance(result, (TextBlock, ImageBlock, DocumentBlock)):
+        return [result]
+    if isinstance(result, (list, tuple)) and all(isinstance(b, _BLOCK_TYPES) for b in result):
+        return list(result)
+    if isinstance(result, str):
+        return result
+    return str(result)
+
+
+def _content_text(content: Any) -> str:
+    """A short textual rendering of (possibly multimodal) content for events."""
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content:
+        parts.append(b.text if isinstance(b, TextBlock) else f"[{getattr(b, 'type', 'block')}]")
+    return " ".join(parts)
+
+
+def _count_tool_results(messages: list[Message]) -> int:
+    """Number of completed tool calls in a transcript (one per ToolResultBlock).
+
+    Doubles as the idempotency ordinal base, so a resumed run keeps stable keys.
+    """
+    return sum(
+        1
+        for m in messages
+        if isinstance(m.content, list)
+        for b in m.content
+        if isinstance(b, ToolResultBlock)
+    )
+
+
+def _render_input(user_input: Any) -> str:
+    if isinstance(user_input, str):
+        return user_input
+    return " ".join(b.text for b in user_input if isinstance(b, TextBlock))
+
+
+def _normalize_verdict(value: Any) -> Verdict:
+    if isinstance(value, Verdict):
+        return value
+    if isinstance(value, tuple):
+        passed, feedback = value
+        return Verdict(passed=bool(passed), feedback=feedback)
+    return Verdict(passed=bool(value))
+
+
+def _make_search_tool(agent: "Agent", active: set[str]) -> Tool:
+    from .context import select_tools
+
+    def search_tools(query: str) -> str:
+        matches = select_tools(query, agent.tools, k=5)
+        for t in matches:
+            active.add(t.name)
+        if not matches:
+            return "no matching tools"
+        return "Activated tools:\n" + "\n".join(f"- {t.name}: {t.description}" for t in matches)
+
+    return Tool(
+        name="search_tools",
+        description="Search available tools by capability; matches become callable this run.",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Capability to find."}},
+            "required": ["query"],
+        },
+        func=search_tools,
+    )
+
+
+def _make_fetch_tool(store: ResultStore) -> Tool:
+    async def fetch_result(ref: str, contains: str = "", max_chars: int = 4000) -> str:
+        text = await store.get(ref)
+        if text is None:
+            return f"no offloaded result named {ref!r}"
+        if contains:
+            hits = [ln for ln in text.splitlines() if contains.lower() in ln.lower()]
+            return "\n".join(hits[:200]) if hits else f"no lines contain {contains!r}"
+        return text[:max_chars]
+
+    return Tool(
+        name="fetch_result",
+        description="Read an offloaded tool result by reference; optionally filter by substring.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string", "description": "The result reference (res_...)."},
+                "contains": {"type": "string", "description": "Only return matching lines."},
+                "max_chars": {"type": "integer", "description": "Max chars when not filtering."},
+            },
+            "required": ["ref"],
+        },
+        func=fetch_result,
+    )
+
+
+async def _execute_tool_use(
+    ctx: RunContext,
+    tool_map: dict[str, Tool],
+    block: ToolUseBlock,
+    sem: Optional[asyncio.Semaphore],
+    ordinal: int = 0,
+) -> ToolResultBlock:
+    impl = tool_map.get(block.name)
+    if impl is None:
+        return ToolResultBlock(block.id, f"Error: no tool named {block.name!r}", is_error=True)
+
+    # Idempotency: replay a recorded result instead of re-running the side effect.
+    journal_key: Optional[str] = None
+    if ctx.journal is not None and ctx.run_id is not None:
+        journal_key = call_key(ctx.run_id, block.name, block.input, ordinal)
+        recorded = await ctx.journal.lookup(journal_key)
+        if recorded is not None:
+            await _emit(ctx, "on_tool_start", block.name, block.input)
+            out = ToolResultBlock(block.id, recorded["content"], is_error=recorded["is_error"])
+            await _emit(ctx, "on_tool_end", block.name, out.content, out.is_error)
+            return out
+
+    if ctx.validate_tool_inputs:
+        errs = validate_json(block.input, impl.parameters)
+        if errs:
+            return ToolResultBlock(
+                block.id, "Invalid tool input: " + "; ".join(errs), is_error=True
+            )
+
+    # Structured permission policy (read-only/plan, ask, auto, bypass). It gates
+    # *every* tool by declared side effect; ASK escalates to the approval callback.
+    if ctx.permissions is not None:
+        from .permissions import Permission
+
+        verdict = ctx.permissions.decide(impl)
+        if verdict is Permission.DENY:
+            return ToolResultBlock(
+                block.id,
+                f"Tool call denied: {impl.name!r} not permitted in "
+                f"{ctx.permissions.mode.value!r} mode",
+                is_error=True,
+            )
+        if verdict is Permission.ASK:
+            if ctx.approval is None:
+                return ToolResultBlock(
+                    block.id,
+                    f"Tool call denied: {impl.name!r} requires approval but no "
+                    "approver is configured",
+                    is_error=True,
+                )
+            decision = _normalize_approval(await maybe_await(ctx.approval(block.name, block.input)))
+            if not decision.allow:
+                reason = decision.reason or "denied by approval policy"
+                return ToolResultBlock(block.id, f"Tool call denied: {reason}", is_error=True)
+
+    if impl.requires_approval and ctx.approval is not None:
+        decision = _normalize_approval(await maybe_await(ctx.approval(block.name, block.input)))
+        if not decision.allow:
+            reason = decision.reason or "denied by approval policy"
+            return ToolResultBlock(block.id, f"Tool call denied: {reason}", is_error=True)
+
+    await _emit(ctx, "on_tool_start", block.name, block.input)
+    guard = sem if sem is not None else contextlib.nullcontext()
+    try:
+        async with guard:
+            call = impl.invoke(**block.input)
+            if ctx.tool_timeout is not None:
+                result = await asyncio.wait_for(call, ctx.tool_timeout)
+            else:
+                result = await call
+        out = ToolResultBlock(block.id, _tool_result_content(result))
+    except asyncio.TimeoutError:
+        out = ToolResultBlock(
+            block.id, f"Error: tool {block.name!r} timed out after {ctx.tool_timeout}s", is_error=True
+        )
+    except Exception as exc:  # tools surface failures back to the model
+        out = ToolResultBlock(block.id, f"Error ({type(exc).__name__}): {exc}", is_error=True)
+
+    # Offload large text results to keep the context window lean.
+    if (
+        ctx.offload_over is not None
+        and ctx.result_store is not None
+        and not out.is_error
+        and isinstance(out.content, str)
+        and len(out.content) > ctx.offload_over
+    ):
+        ref = await ctx.result_store.put(out.content)
+        out = ToolResultBlock(block.id, make_preview(out.content, ref))
+
+    if journal_key is not None and ctx.journal is not None and isinstance(out.content, str):
+        await ctx.journal.record(journal_key, {"content": out.content, "is_error": out.is_error})
+
+    await _emit(ctx, "on_tool_end", block.name, out.content, out.is_error)
+    return out
+
+
+async def _drive_stream(
+    ctx: RunContext,
+    agent: "Agent",
+    messages: list[Message],
+    deadline: Optional[float],
+) -> AsyncIterator[Union[RunEvent, _TurnInfo]]:
+    active: set[str] = set()
+    base_map = agent.tool_map
+    search_tool = _make_search_tool(agent, active) if ctx.tool_search else None
+    sem = asyncio.Semaphore(ctx.max_parallel_tools) if ctx.max_parallel_tools else None
+    loop = asyncio.get_running_loop()
+
+    # Always-exposed builtin tools: plan management, offloaded-result fetch.
+    builtins: list[Tool] = []
+    if ctx.plan is not None:
+        builtins += plan_tools(ctx.plan)
+    if ctx.offload_over is not None and ctx.result_store is not None:
+        builtins.append(_make_fetch_tool(ctx.result_store))
+
+    def exposed_tools() -> list[Tool]:
+        base = (
+            agent.tools
+            if search_tool is None
+            else [search_tool, *[t for t in agent.tools if t.name in active]]
+        )
+        return [*builtins, *base]
+
+    def tool_map() -> dict[str, Tool]:
+        m = {t.name: t for t in builtins}
+        m.update(base_map)
+        if search_tool is not None:
+            m[search_tool.name] = search_tool
+        return m
+
+    system_static = agent.instructions
+    if ctx.grounding_context:
+        system_static = (
+            system_static
+            + "\n\n# Business context (from the knowledge graph)\n"
+            + ctx.grounding_context
+        ).strip()
+    if ctx.output_schema:
+        system_static = (system_static + "\n\n" + schema_instruction(ctx.output_schema)).strip()
+
+    # Loop-engineering guard state (across iterations).
+    call_turns: dict[tuple, int] = {}
+    consecutive_errors = 0
+    last_turn_sig: Optional[tuple] = None
+    no_progress = 0
+    # Global tool-call ordinal for idempotency keys. Derived from the transcript
+    # (= number of completed tool calls) so a resumed run keeps the same keys.
+    executed = _count_tool_results(messages)
+
+    # Durable recovery: a restored checkpoint may end at an assistant tool-use
+    # turn whose tool batch never finished (the process died mid-batch). Re-run
+    # that batch before the next model call — the journal replays the tools that
+    # *did* complete, so side effects fire exactly once and the batch completes
+    # atomically.
+    if messages and messages[-1].role == "assistant" and messages[-1].tool_uses:
+        pending = messages[-1].tool_uses
+        tmap0 = tool_map()
+        recovered = await asyncio.gather(
+            *(
+                _execute_tool_use(ctx, tmap0, block, sem, executed + i)
+                for i, block in enumerate(pending)
+            )
+        )
+        executed += len(pending)
+        for r in recovered:
+            yield ToolOutput(
+                id=r.tool_use_id, name="", content=_content_text(r.content), is_error=r.is_error
+            )
+        messages.append(Message(role="user", content=list(recovered)))
+        if ctx.checkpointer is not None and ctx.run_id is not None:
+            await ctx.checkpointer.save(ctx.run_id, messages)
+
+    iterations = 0
+    for iterations in range(1, ctx.max_iterations + 1):
+        if deadline is not None and loop.time() > deadline:
+            raise RunTimeout(f"run exceeded {ctx.timeout}s")
+
+        # Steering: drain operator guidance / honor a stop request at the turn
+        # boundary, before the next model call — never mid-turn.
+        if ctx.steer is not None:
+            if ctx.steer.stop_requested:
+                yield _TurnInfo(iterations - 1, "steered_stop")
+                return
+            for text in ctx.steer.drain():
+                messages.append(Message(role="user", content=f"[steering] {text}"))
+                yield Steered(text=text)
+
+        if ctx.compactor is not None:
+            messages[:] = await ctx.compactor.maybe_compact(messages)
+
+        # The plan is a live context anchor — render it fresh each turn.
+        system = system_static
+        if ctx.plan is not None:
+            system = (
+                system_static
+                + "\n\n# Plan (keep it current with write_plan / update_step)\n"
+                + ctx.plan.render()
+            )
+
+        response = None
+        async for chunk in agent.model.stream(
+            system=system, messages=messages, tools=exposed_tools()
+        ):
+            if isinstance(chunk, TextDelta):
+                yield chunk
+            elif isinstance(chunk, ModelStreamEnd):
+                response = chunk.response
+        assert response is not None, "model stream ended without a final message"
+
+        messages.append(response.message)
+        ctx.usage.add(response.usage)
+        await _emit(ctx, "on_model_response", response)
+        await _emit(ctx, "on_turn_end", iterations, response.message)
+
+        if ctx.checkpointer is not None and ctx.run_id is not None:
+            await ctx.checkpointer.save(ctx.run_id, messages)
+
+        if response.stop_reason != "tool_use":
+            yield _TurnInfo(iterations, response.stop_reason)
+            return
+
+        if ctx.token_budget is not None and ctx.usage.total_tokens >= ctx.token_budget:
+            yield _TurnInfo(iterations, "budget_exceeded")
+            return
+
+        uses = response.message.tool_uses
+        sigs = [(b.name, json.dumps(b.input, sort_keys=True, default=str)) for b in uses]
+
+        # No-progress: the same set of tool calls repeated turn after turn.
+        if ctx.max_no_progress is not None and uses:
+            turn_sig = tuple(sorted(sigs))
+            no_progress = no_progress + 1 if turn_sig == last_turn_sig else 0
+            last_turn_sig = turn_sig
+            if no_progress >= ctx.max_no_progress:
+                yield _TurnInfo(iterations, "no_progress")
+                return
+
+        # Loop detection: one tool call signature recurring across too many turns.
+        if ctx.max_repeated_tool_calls is not None and uses:
+            for sig in set(sigs):
+                call_turns[sig] = call_turns.get(sig, 0) + 1
+            if any(c > ctx.max_repeated_tool_calls for c in call_turns.values()):
+                yield _TurnInfo(iterations, "loop_detected")
+                return
+
+        for block in uses:
+            yield ToolCall(id=block.id, name=block.name, input=block.input)
+
+        tmap = tool_map()
+        results = await asyncio.gather(
+            *(
+                _execute_tool_use(ctx, tmap, block, sem, executed + i)
+                for i, block in enumerate(uses)
+            )
+        )
+        executed += len(uses)
+        for r in results:
+            yield ToolOutput(
+                id=r.tool_use_id, name="", content=_content_text(r.content), is_error=r.is_error
+            )
+        messages.append(Message(role="user", content=list(results)))
+
+        if ctx.checkpointer is not None and ctx.run_id is not None:
+            await ctx.checkpointer.save(ctx.run_id, messages)
+
+        # Circuit breaker: every tool call in the turn failed, repeatedly.
+        if ctx.max_consecutive_tool_errors is not None and results:
+            consecutive_errors = consecutive_errors + 1 if all(r.is_error for r in results) else 0
+            if consecutive_errors >= ctx.max_consecutive_tool_errors:
+                yield _TurnInfo(iterations, "tool_errors_exhausted")
+                return
+
+    yield _TurnInfo(iterations, "max_iterations")
+
+
+async def _verify_stream(
+    ctx: RunContext,
+    agent: "Agent",
+    messages: list[Message],
+    deadline: Optional[float],
+) -> AsyncIterator[Union[RunEvent, _TurnInfo]]:
+    total = 0
+    stop_reason = "end_turn"
+    rounds = 0
+    for rounds in range(1, ctx.max_verify_rounds + 1):
+        async for ev in _drive_stream(ctx, agent, messages, deadline):
+            if isinstance(ev, _TurnInfo):
+                total += ev.iterations
+                stop_reason = ev.stop_reason
+            else:
+                yield ev
+        if ctx.verify is None:
+            break
+        output = next((m.text for m in reversed(messages) if m.role == "assistant"), "")
+        verdict = _normalize_verdict(await maybe_await(ctx.verify(output)))
+        if verdict.passed:
+            stop_reason = "verified"
+            break
+        if rounds < ctx.max_verify_rounds:
+            messages.append(
+                Message(
+                    role="user",
+                    content=(
+                        "Your previous answer was rejected by verification: "
+                        f"{verdict.feedback or 'does not meet requirements'}. Please revise."
+                    ),
+                )
+            )
+        else:
+            stop_reason = "verification_failed"
+    yield _TurnInfo(total, stop_reason, verify_rounds=rounds)
+
+
+async def arun_stream(
+    agent: "Agent",
+    user_input: "str | list",
+    *,
+    session: Session | None = None,
+    context: RunContext | None = None,
+) -> AsyncIterator[RunEvent]:
+    """Run ``agent`` and yield events as they happen, ending with
+    :class:`~synapse.streaming.RunComplete`."""
+    ctx = context or RunContext()
+    if ctx.response_model is not None and ctx.output_schema is None:
+        ctx.output_schema = model_schema(ctx.response_model)
+    if ctx.offload_over is not None and ctx.result_store is None:
+        ctx.result_store = InMemoryResultStore()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ctx.timeout if ctx.timeout else None
+
+    await _emit(ctx, "on_run_start", agent.name, _render_input(user_input))
+    if ctx.grounding is not None and ctx.grounding_context is None:
+        ctx.grounding_context = await maybe_await(ctx.grounding(_render_input(user_input)))
+    if isinstance(user_input, str):
+        user_content: Any = await apply_guardrails(user_input, ctx.input_guardrails)
+    else:
+        # Multimodal input (list of blocks): guardrails run on text only.
+        user_content = user_input
+
+    async def _stream_body() -> AsyncIterator[RunEvent]:
+        messages: list[Message] = []
+        if session is not None:
+            messages = list(session.messages)
+        elif ctx.checkpointer is not None and ctx.run_id is not None:
+            restored = await ctx.checkpointer.load(ctx.run_id)
+            if restored:
+                messages = restored
+        # Durable resume: if the restored transcript ends mid-flight (an assistant
+        # tool-use turn whose results never landed), don't append a fresh user
+        # turn — we're continuing that run, and _drive_stream recovers the batch.
+        mid_flight = bool(messages) and messages[-1].role == "assistant" and bool(
+            messages[-1].tool_uses
+        )
+        if not mid_flight:
+            messages.append(Message(role="user", content=user_content))
+
+        iterations = 0
+        stop_reason = "end_turn"
+        rounds = 1
+        async for ev in _verify_stream(ctx, agent, messages, deadline):
+            if isinstance(ev, _TurnInfo):
+                iterations, stop_reason, rounds = ev.iterations, ev.stop_reason, ev.verify_rounds
+            else:
+                yield ev
+
+        if session is not None:
+            session.extend(messages)
+
+        output = next((m.text for m in reversed(messages) if m.role == "assistant"), "")
+        output = await apply_guardrails(output, ctx.output_guardrails)
+        parsed = None
+        if ctx.output_schema:
+            parsed, _ = parse_output(output, ctx.output_schema)
+            if parsed is not None and ctx.response_model is not None:
+                parsed = instantiate(ctx.response_model, parsed)
+        result = RunResult(
+            output=output,
+            messages=messages,
+            agent=agent.name,
+            iterations=iterations,
+            stop_reason=stop_reason,
+            usage=ctx.usage,
+            verify_rounds=rounds,
+            parsed=parsed,
+            plan=ctx.plan,
+        )
+        await _emit(ctx, "on_run_end", result)
+        yield RunComplete(result=result)
+
+    if session is not None:
+        async with session.lock:
+            async for ev in _stream_body():
+                yield ev
+    else:
+        async for ev in _stream_body():
+            yield ev
+
+
+async def arun_agent(
+    agent: "Agent",
+    user_input: "str | list",
+    *,
+    max_iterations: int = 12,
+    session: Session | None = None,
+    context: RunContext | None = None,
+) -> RunResult:
+    """Run ``agent`` on ``user_input`` until done (async); returns the result."""
+    ctx = context or RunContext(max_iterations=max_iterations)
+    if context is None:
+        ctx.max_iterations = max_iterations
+
+    async def _collect() -> RunResult:
+        result: RunResult | None = None
+        async for ev in arun_stream(agent, user_input, session=session, context=ctx):
+            if isinstance(ev, RunComplete):
+                result = ev.result
+        assert result is not None
+        return result
+
+    if ctx.timeout is not None:
+        try:
+            return await asyncio.wait_for(_collect(), ctx.timeout)
+        except asyncio.TimeoutError as exc:
+            raise RunTimeout(f"run exceeded {ctx.timeout}s") from exc
+    return await _collect()
+
+
+def run_agent(
+    agent: "Agent",
+    user_input: "str | list",
+    *,
+    max_iterations: int = 12,
+    session: Session | None = None,
+    context: RunContext | None = None,
+) -> RunResult:
+    """Synchronous wrapper around :func:`arun_agent`."""
+    return run_sync(
+        arun_agent(
+            agent, user_input, max_iterations=max_iterations, session=session, context=context
+        )
+    )
