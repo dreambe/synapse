@@ -263,6 +263,9 @@ result = agent.run(
 | Loop control (loop detection / no-progress / circuit breaker) | `max_repeated_tool_calls=`, `max_no_progress=`, `max_consecutive_tool_errors=` | **solid** |
 | Observability hooks + token usage | `Hooks`, `CollectingHooks`, `Usage` | **solid** |
 | Tool approval (HITL) | `approval=`, `@tool(requires_approval=True)` | **solid** |
+| Permission modes (read-only/plan, ask, auto, bypass) | `permission_policy(...)`, `@tool(side_effect=...)` | **solid** |
+| Governance (rate limit / quota / concurrency, per scope) | `Governor`, `RateLimiter`, `Quota` | **solid** |
+| Durable execution (atomic mid-batch recovery on resume) | `run_id=` + `journal=` + `checkpointer=` | **solid** |
 | Knowledge grounding (KG/RAG preflight) | `grounding=` → injected business context | **solid** |
 | Human escalation (ask a person) | `human_tool(channel)`, `HumanChannel`/`CallbackChannel` | **solid** |
 | Multi-tenant isolation (session + memory) | per-`Session` history, `MemoryNamespace.scope(key)` | **solid** |
@@ -351,11 +354,12 @@ Anthropic  OpenAI*    Echo      Scripted
 This is an experimental framework with a deliberate point of view, not a
 finished product. What it does **not** do yet (by design or as known debt):
 
-- **Durability is per-tool-idempotent, not full durable execution.** A
-  `journal=` makes replaying an identical call sequence skip already-run tools
-  (no double side effects), and `checkpointer=` snapshots the transcript — but
-  there's no atomic recovery of a half-finished parallel tool batch or a
-  distributed execution graph.
+- **Durability covers single-process crash recovery, not a distributed graph.**
+  A `journal=` (write-ahead per tool) + `checkpointer=` + `run_id` now give
+  **atomic mid-batch recovery**: a resumed run re-runs an unfinished parallel
+  tool batch, replaying completed tools (no double side effects). Still missing:
+  a distributed execution graph, cross-process leasing, and exactly-once
+  delivery across machines.
 - **Some defaults are lexical, not semantic.** Tool search and the rule-based
   `Router` use keyword overlap (swap in an LLM/embeddings for nuance). Memory
   now has a semantic option (`VectorMemory` + an `Embedder`); the in-memory/file

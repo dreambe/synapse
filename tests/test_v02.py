@@ -267,8 +267,10 @@ async def test_compactor_summarizes():
     compactor = Compactor(summarizer, trigger_messages=2, keep_recent=1)
     messages = [Message("user", f"m{i}") for i in range(5)]
     out = await compactor.maybe_compact(messages)
-    assert len(out) == 2
-    assert "A SUMMARY" in out[0].text
+    # First turn preserved verbatim, then the recap, then the kept tail.
+    assert len(out) == 3
+    assert out[0].text == "m0"
+    assert "A SUMMARY" in out[1].text
 
 
 def test_select_tools_ranks_by_relevance():

@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .messages import Message, TextBlock
 
@@ -18,11 +18,23 @@ if TYPE_CHECKING:
     from .tool import Tool
 
 
+def _estimate_tokens(messages: list[Message]) -> int:
+    """A cheap, dependency-free token estimate (~4 chars/token)."""
+    return sum(len(m.text) for m in messages if m.text) // 4
+
+
 class Compactor:
     """Summarizes earlier conversation when it grows too long.
 
-    Triggers once the message count exceeds ``trigger_messages``; collapses
-    everything except the last ``keep_recent`` messages into one recap turn.
+    Triggers when the message count exceeds ``trigger_messages`` *or* (if set)
+    the estimated token count exceeds ``trigger_tokens`` — so a few very large
+    turns compact as readily as many small ones. The original task (the first
+    user turn) is **preserved verbatim**, the middle is summarized into one
+    structured recap (decisions / facts / open threads / artifacts), and the last
+    ``keep_recent`` turns are kept verbatim.
+
+    Still lossy by nature: a summary is not the transcript. Keep ``keep_recent``
+    generous for tasks where recent tool detail matters.
     """
 
     def __init__(
@@ -30,23 +42,41 @@ class Compactor:
         model: "Model",
         *,
         trigger_messages: int = 24,
+        trigger_tokens: Optional[int] = None,
         keep_recent: int = 8,
     ) -> None:
         self.model = model
         self.trigger_messages = trigger_messages
+        self.trigger_tokens = trigger_tokens
         self.keep_recent = keep_recent
 
+    def _should_compact(self, messages: list[Message]) -> bool:
+        if len(messages) > self.trigger_messages:
+            return True
+        if self.trigger_tokens is not None and _estimate_tokens(messages) > self.trigger_tokens:
+            return True
+        return False
+
     async def maybe_compact(self, messages: list[Message]) -> list[Message]:
-        if len(messages) <= self.trigger_messages:
+        # Need room for: the preserved first turn + a recap + the kept tail.
+        if not self._should_compact(messages) or len(messages) <= self.keep_recent + 2:
             return messages
 
-        head = messages[: -self.keep_recent]
+        first = messages[0]  # the original task — never summarized away
+        middle = messages[1 : -self.keep_recent]
         tail = messages[-self.keep_recent :]
+        if not middle:
+            return messages
 
-        transcript = "\n".join(f"{m.role}: {m.text}" for m in head if m.text)
+        transcript = "\n".join(f"{m.role}: {m.text}" for m in middle if m.text)
         prompt = (
-            "Summarize the following conversation so it can stand in for the "
-            "original turns. Preserve decisions, facts, and open threads.\n\n"
+            "Compress the conversation excerpt below into a faithful recap that "
+            "can stand in for those turns. Use these sections, omitting any that "
+            "are empty:\n"
+            "- Decisions: choices made and why\n"
+            "- Facts: concrete findings, values, file paths, identifiers\n"
+            "- Open threads: what is still pending or unresolved\n"
+            "- Artifacts: results produced or offloaded (with references)\n\n"
             + transcript
         )
         response = await self.model.generate(
@@ -58,7 +88,7 @@ class Compactor:
             role="user",
             content=[TextBlock("[Summary of earlier conversation]\n" + response.message.text)],
         )
-        return [recap, *tail]
+        return [first, recap, *tail]
 
 
 def _score(query: str, tool: "Tool") -> int:

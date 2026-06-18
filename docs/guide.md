@@ -303,6 +303,64 @@ def approve(tool_name, tool_input):
 agent.run("...", approval=approve)   # denied calls return an error to the model
 ```
 
+## Permission modes (structured policy)
+
+Raise per-tool approval to a declared, run-wide **mode**. Classification comes
+from each tool's `side_effect` (`"read"` vs the safe default `"write"`):
+
+```python
+from synapse import permission_policy, PermissionMode, tool
+
+@tool(side_effect="read")
+def read_db(q: str) -> str: ...
+@tool                      # side_effect="write" by default
+def drop_table(t: str) -> str: ...
+
+agent.run(task, permissions=permission_policy(PermissionMode.PLAN))  # read-only
+```
+
+- `PLAN` — read-only: allow reads, **deny** every write (investigate & plan).
+- `ASK` — allow reads, **escalate** writes to `approval=` (deny if none — fail safe).
+- `AUTO` — allow everything (still honoring a tool's own `requires_approval`).
+- `BYPASS` — allow everything, explicitly.
+
+`permission_policy(mode, allow={...}, deny={...})` carves name-based exceptions
+that win over the mode.
+
+## Governance (rate limit / quota / concurrency)
+
+Admission control for serving an agent to many tenants — **isolated per scope**:
+
+```python
+from synapse import Governor
+
+gov = Governor(max_concurrency=8, rate=5.0, burst=10, quota=1_000_000, quota_period=86_400)
+
+async with gov.admit(tenant_id):     # rate token + quota charge + concurrency slot
+    result = await agent.arun(task)
+```
+
+`async with gov.admit(scope, block=False)` raises `RateLimited` / `QuotaExceeded`
+instead of waiting. `RateLimiter` (token bucket) and `Quota` are usable on their
+own. **Scope keys must come from authn, never user input** (same rule as tenant
+memory isolation).
+
+## Durable execution (atomic mid-batch recovery)
+
+Pass a stable `run_id` with both a `journal=` (write-ahead per tool) and a
+`checkpointer=` (transcript snapshots):
+
+```python
+agent.run(task, run_id="job-42", journal=journal, checkpointer=checkpointer)
+# ... process dies mid parallel-tool-batch ...
+agent.run(task, run_id="job-42", journal=journal, checkpointer=checkpointer)  # resume
+```
+
+On resume, a transcript that ends at an unfinished tool batch is recovered: the
+tools that already completed **replay from the journal** (no double side
+effects) and the rest run, so the batch finishes atomically before the next
+model turn. Single-process crash recovery — not a distributed execution graph.
+
 ## Verifier (iterate until it passes)
 
 ```python
@@ -407,12 +465,17 @@ When history grows, summarize old turns so the loop can keep going:
 
 ```python
 from synapse import Compactor
-compactor = Compactor(agent.model, trigger_messages=24, keep_recent=8)
+compactor = Compactor(agent.model, trigger_messages=24, trigger_tokens=50_000, keep_recent=8)
 agent.run("...", compactor=compactor)
 ```
 
-> First cut: naive prefix summarization. Good enough to stay in-window; not a
-> token-exact policy.
+Triggers on message count **or** an estimated token threshold (`trigger_tokens`),
+**preserves the original task** (first user turn) verbatim, and summarizes the
+middle into a structured recap (decisions / facts / open threads / artifacts);
+the last `keep_recent` turns stay verbatim.
+
+> Still lossy by nature — a summary is not the transcript. The token estimate is
+> a ~4-chars/token heuristic, not a tokenizer-exact count.
 
 ## Resilience
 

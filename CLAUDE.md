@@ -44,8 +44,11 @@ pytest -m integration   # gated; only runs with ANTHROPIC_API_KEY / OPENAI_API_K
   dashboard), `verifiers.py`, `guardrails.py`, `human.py`
   (escalation), `skill.py`, `structured.py`, `evaluation.py`,
   `benchmark.py` (versioned eval standard + `synapse_benchmark()` regression spine),
+  `steering.py` (mid-run control), `permissions.py` (structured permission modes),
+  `governance.py` (rate limit / quota / concurrency per scope),
   `harness.py` + `selfharness.py`, `sandbox.py`, `router.py`, `team.py`,
-  `registry.py`, `checkpoint.py`.
+  `registry.py`, `checkpoint.py`. Durable execution = `journal` + `checkpointer`
+  + `run_id` (atomic mid-batch recovery in `runtime.py`).
 - `a2a/` — A2A v0.3.0 (spec/jsonrpc/dispatcher/asgi compliant server, client,
   push, task store) + a synapse-native `/run` convenience layer.
 
@@ -86,9 +89,11 @@ pytest -m integration   # gated; only runs with ANTHROPIC_API_KEY / OPENAI_API_K
   agent-harness principles, NOT any leaked/proprietary prompt; each clause is
   wired to a mechanism synapse ships. Still a first cut to tune, but the "give
   it a spine" gap is no longer empty.
-- Compaction (naive prefix summary) and tool-search/router (keyword) are
-  first-cut heuristics.
-- No full durable execution (atomic mid-batch recovery), no global rate
-  limiting/quotas, no secrets manager, no PyPI release.
+- Compaction now triggers on tokens, preserves the first turn, and writes a
+  structured recap (still lossy). Tool-search/router remain keyword first-cuts.
+- Durable execution now does **atomic mid-batch recovery** (journal +
+  checkpointer + run_id); still no distributed execution graph / cross-process
+  leasing / exactly-once across machines. Governance (`Governor`: rate/quota/
+  concurrency per scope) now exists. Still missing: secrets manager, PyPI release.
 - `run_sync` spins a worker-thread loop when called inside a running loop —
   fine for scripts, not for embedding in an async server.

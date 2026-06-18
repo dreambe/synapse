@@ -37,6 +37,9 @@ class Tool:
     # When True, the run loop asks the configured approval callback before
     # executing this tool (human-in-the-loop / policy gating).
     requires_approval: bool = False
+    # Declared side effect, used by permission policies. "read" tools are safe
+    # to run in read-only / plan mode; the safe default is "write" (mutating).
+    side_effect: str = "write"
 
     @property
     def is_async(self) -> bool:
@@ -74,6 +77,7 @@ def _build_tool(
     name: str | None,
     description: str | None,
     requires_approval: bool = False,
+    side_effect: str = "write",
 ) -> Tool:
     sig = inspect.signature(func)
     try:
@@ -105,6 +109,7 @@ def _build_tool(
         },
         func=func,
         requires_approval=requires_approval,
+        side_effect=side_effect,
     )
 
 
@@ -114,6 +119,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     requires_approval: bool = False,
+    side_effect: str = "write",
 ) -> Any:
     """Turn a function (sync or ``async def``) into a :class:`Tool`.
 
@@ -131,7 +137,7 @@ def tool(
     """
 
     def wrap(f: Callable[..., Any]) -> Tool:
-        return _build_tool(f, name, description, requires_approval)
+        return _build_tool(f, name, description, requires_approval, side_effect)
 
     if func is not None:
         return wrap(func)

@@ -121,11 +121,24 @@ from .models import (
     RetryModel,
     ScriptedModel,
 )
+from .governance import (
+    Governor,
+    Quota,
+    QuotaExceeded,
+    RateLimited,
+    RateLimiter,
+)
 from .observability import (
     CollectingHooks,
     CompositeHooks,
     Hooks,
     Usage,
+)
+from .permissions import (
+    Permission,
+    PermissionMode,
+    PermissionPolicy,
+    permission_policy,
 )
 from .registry import AgentRegistry
 from .router import ModelRouter, Router
@@ -179,6 +192,17 @@ __all__ = [
     "RunComplete",
     # steering (mid-run control)
     "Steer",
+    # permission modes (structured policy)
+    "PermissionMode",
+    "PermissionPolicy",
+    "Permission",
+    "permission_policy",
+    # governance (rate limit / quota / concurrency)
+    "Governor",
+    "RateLimiter",
+    "Quota",
+    "RateLimited",
+    "QuotaExceeded",
     # models
     "Model",
     "ModelResponse",

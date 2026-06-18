@@ -67,6 +67,7 @@ if TYPE_CHECKING:  # avoid circular imports at runtime
     from .agent import Agent
     from .checkpoint import Checkpointer
     from .context import Compactor
+    from .permissions import PermissionPolicy
     from .steering import Steer
 
 _T = TypeVar("_T")
@@ -167,6 +168,8 @@ class RunContext:
     plan: Optional[Plan] = None
     # Mid-run steering: inject guidance / request a graceful stop at turn bounds.
     steer: Optional["Steer"] = None
+    # Structured permission policy (read-only/plan, ask, auto, bypass).
+    permissions: Optional["PermissionPolicy"] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -239,6 +242,20 @@ def _content_text(content: Any) -> str:
     for b in content:
         parts.append(b.text if isinstance(b, TextBlock) else f"[{getattr(b, 'type', 'block')}]")
     return " ".join(parts)
+
+
+def _count_tool_results(messages: list[Message]) -> int:
+    """Number of completed tool calls in a transcript (one per ToolResultBlock).
+
+    Doubles as the idempotency ordinal base, so a resumed run keeps stable keys.
+    """
+    return sum(
+        1
+        for m in messages
+        if isinstance(m.content, list)
+        for b in m.content
+        if isinstance(b, ToolResultBlock)
+    )
 
 
 def _render_input(user_input: Any) -> str:
@@ -334,6 +351,32 @@ async def _execute_tool_use(
                 block.id, "Invalid tool input: " + "; ".join(errs), is_error=True
             )
 
+    # Structured permission policy (read-only/plan, ask, auto, bypass). It gates
+    # *every* tool by declared side effect; ASK escalates to the approval callback.
+    if ctx.permissions is not None:
+        from .permissions import Permission
+
+        verdict = ctx.permissions.decide(impl)
+        if verdict is Permission.DENY:
+            return ToolResultBlock(
+                block.id,
+                f"Tool call denied: {impl.name!r} not permitted in "
+                f"{ctx.permissions.mode.value!r} mode",
+                is_error=True,
+            )
+        if verdict is Permission.ASK:
+            if ctx.approval is None:
+                return ToolResultBlock(
+                    block.id,
+                    f"Tool call denied: {impl.name!r} requires approval but no "
+                    "approver is configured",
+                    is_error=True,
+                )
+            decision = _normalize_approval(await maybe_await(ctx.approval(block.name, block.input)))
+            if not decision.allow:
+                reason = decision.reason or "denied by approval policy"
+                return ToolResultBlock(block.id, f"Tool call denied: {reason}", is_error=True)
+
     if impl.requires_approval and ctx.approval is not None:
         decision = _normalize_approval(await maybe_await(ctx.approval(block.name, block.input)))
         if not decision.allow:
@@ -424,7 +467,32 @@ async def _drive_stream(
     consecutive_errors = 0
     last_turn_sig: Optional[tuple] = None
     no_progress = 0
-    executed = 0  # global tool-call ordinal, for idempotency keys
+    # Global tool-call ordinal for idempotency keys. Derived from the transcript
+    # (= number of completed tool calls) so a resumed run keeps the same keys.
+    executed = _count_tool_results(messages)
+
+    # Durable recovery: a restored checkpoint may end at an assistant tool-use
+    # turn whose tool batch never finished (the process died mid-batch). Re-run
+    # that batch before the next model call — the journal replays the tools that
+    # *did* complete, so side effects fire exactly once and the batch completes
+    # atomically.
+    if messages and messages[-1].role == "assistant" and messages[-1].tool_uses:
+        pending = messages[-1].tool_uses
+        tmap0 = tool_map()
+        recovered = await asyncio.gather(
+            *(
+                _execute_tool_use(ctx, tmap0, block, sem, executed + i)
+                for i, block in enumerate(pending)
+            )
+        )
+        executed += len(pending)
+        for r in recovered:
+            yield ToolOutput(
+                id=r.tool_use_id, name="", content=_content_text(r.content), is_error=r.is_error
+            )
+        messages.append(Message(role="user", content=list(recovered)))
+        if ctx.checkpointer is not None and ctx.run_id is not None:
+            await ctx.checkpointer.save(ctx.run_id, messages)
 
     iterations = 0
     for iterations in range(1, ctx.max_iterations + 1):
@@ -601,7 +669,14 @@ async def arun_stream(
             restored = await ctx.checkpointer.load(ctx.run_id)
             if restored:
                 messages = restored
-        messages.append(Message(role="user", content=user_content))
+        # Durable resume: if the restored transcript ends mid-flight (an assistant
+        # tool-use turn whose results never landed), don't append a fresh user
+        # turn — we're continuing that run, and _drive_stream recovers the batch.
+        mid_flight = bool(messages) and messages[-1].role == "assistant" and bool(
+            messages[-1].tool_uses
+        )
+        if not mid_flight:
+            messages.append(Message(role="user", content=user_content))
 
         iterations = 0
         stop_reason = "end_turn"

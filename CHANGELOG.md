@@ -17,6 +17,37 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Structured permission modes.** A `PermissionPolicy` (`permission_policy(...)`)
+  raises per-tool approval to a declared, run-wide **mode** — `PLAN` (read-only:
+  allow reads, deny every mutating tool), `ASK` (allow reads, escalate writes to
+  the approval callback; deny if none — fail safe), `AUTO` (allow), `BYPASS`
+  (allow, explicitly). A tool's new `side_effect` field (`"read"` vs the safe
+  default `"write"`) drives classification; `allow`/`deny` name-sets override the
+  mode. "This run is read-only" becomes one structural decision, not a per-tool
+  habit. Wired via `arun(permissions=...)` / `RunContext.permissions`.
+- **Governance (rate limits, quotas, concurrency) for agents-as-services.** A
+  `Governor` hands out an **isolated** rate limiter + quota + concurrency cap
+  **per scope** (tenant/user) — `async with governor.admit(scope)` is the one
+  admission call a server makes per request. Building blocks usable alone:
+  `RateLimiter` (async token bucket, burst + sustained rate), `Quota`
+  (cumulative budget with optional period reset). The clock is injectable, so
+  behavior is deterministic in tests; `RateLimited` / `QuotaExceeded` signal
+  admission failure. Scope keys must come from authn (same rule as tenant memory).
+- **Durable execution: atomic mid-batch recovery.** The journal already records
+  each tool result write-ahead; now a resumed run (same `run_id` +
+  `checkpointer` + `journal`) whose transcript ends at an unfinished parallel
+  tool batch **re-runs that batch before the next model call** — the journal
+  replays the tools that completed (no double side effects) and the rest run, so
+  the batch finishes atomically. The idempotency ordinal is derived from the
+  transcript, so keys stay stable across the crash; `arun_stream` no longer
+  appends a spurious user turn when resuming mid-flight. Closes the "no atomic
+  recovery of a half-finished parallel batch" gap.
+- **Stronger compaction.** `Compactor` now also triggers on an estimated
+  **token** threshold (`trigger_tokens=`), **preserves the original task** (first
+  user turn) verbatim, and summarizes the middle into a *structured* recap
+  (decisions / facts / open threads / artifacts) instead of a flat blob. Still
+  lossy by nature (documented) — but no longer drops the task statement or fires
+  only on message count.
 - **Mid-run steering (interruptibility).** A run is no longer a black box you can
   only kill and restart. Pass a `Steer` channel (`steer=`); a supervisor — a
   human or another agent — can `steer.send("focus on X")` to inject guidance into
