@@ -255,6 +255,7 @@ result = agent.run(
 | Idempotent execution (no double side effects on replay) | `journal=`, `ExecutionJournal` | **solid** |
 | Run records (persisted fact source) | `RunRecorder`, `RunStore` | **solid** |
 | Streaming | `agent.astream(...)`, `Model.stream` | **solid** |
+| Mid-run steering (inject guidance / graceful stop) | `Steer`, `steer=` → `Steered` event / `steered_stop` | **solid** |
 | Multimodal (images & documents, in & out) | `ImageBlock`, `DocumentBlock` | **solid** |
 | Provider-neutral backends | `AnthropicModel`, `OpenAIModel` (+ any OpenAI-compatible) | **solid** |
 | Bounded tool concurrency | `max_parallel_tools=` | **solid** |

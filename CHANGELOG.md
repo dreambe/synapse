@@ -17,6 +17,17 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Mid-run steering (interruptibility).** A run is no longer a black box you can
+  only kill and restart. Pass a `Steer` channel (`steer=`); a supervisor — a
+  human or another agent — can `steer.send("focus on X")` to inject guidance into
+  a *running* agent, or `steer.stop()` for a graceful halt. Steering is applied at
+  the next **turn boundary** (never mid-turn, so the loop stays consistent):
+  injected guidance enters the transcript as a `[steering] …` user turn and
+  streaming consumers receive a `Steered` event; a stop yields
+  `stop_reason="steered_stop"`. Sends are plain sync calls, so you can steer from
+  any context (typically: run in one task, steer from another). This mirrors a
+  publicly-observable frontier-agent behavior (interrupt/steer), built on
+  synapse's own streaming loop — not on any leaked source.
 - **Curated default harness (the framework's spine).** `default_harness()` /
   `DEFAULT_INSTRUCTIONS` give synapse an opinionated, ready-to-use system prompt
   — agency/persistence, plan-then-act, gather-then-act context discipline,

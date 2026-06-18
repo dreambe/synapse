@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from .a2a.protocol import AgentCard
     from .checkpoint import Checkpointer
     from .context import Compactor
+    from .steering import Steer
 
 
 class Agent:
@@ -122,6 +123,7 @@ class Agent:
             offload_over=opts.get("offload_over"),
             result_store=opts.get("result_store"),
             journal=opts.get("journal"),
+            steer=opts.get("steer"),
             tool_search=(
                 self.tool_search if opts.get("tool_search") is None else opts["tool_search"]
             ),
@@ -158,6 +160,7 @@ class Agent:
         offload_over: int | None = None,
         result_store: object | None = None,
         journal: object | None = None,
+        steer: "Steer | None" = None,
         tool_search: bool | None = None,
     ) -> RunResult:
         """Run this agent to completion (async). The canonical, typed entry point."""
@@ -188,6 +191,7 @@ class Agent:
             offload_over=offload_over,
             result_store=result_store,
             journal=journal,
+            steer=steer,
             tool_search=tool_search,
         )
         return await arun_agent(self, user_input, session=session, context=ctx)

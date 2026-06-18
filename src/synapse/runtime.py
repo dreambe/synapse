@@ -45,7 +45,15 @@ from .messages import (
 from .observability import Hooks, Usage
 from .plan import Plan, plan_tools
 from .results import InMemoryResultStore, ResultStore, make_preview
-from .streaming import ModelStreamEnd, RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
+from .streaming import (
+    ModelStreamEnd,
+    RunComplete,
+    RunEvent,
+    Steered,
+    TextDelta,
+    ToolCall,
+    ToolOutput,
+)
 from .structured import (
     instantiate,
     model_schema,
@@ -59,6 +67,7 @@ if TYPE_CHECKING:  # avoid circular imports at runtime
     from .agent import Agent
     from .checkpoint import Checkpointer
     from .context import Compactor
+    from .steering import Steer
 
 _T = TypeVar("_T")
 
@@ -156,6 +165,8 @@ class RunContext:
     offload_over: Optional[int] = None
     journal: Optional[ExecutionJournal] = None
     plan: Optional[Plan] = None
+    # Mid-run steering: inject guidance / request a graceful stop at turn bounds.
+    steer: Optional["Steer"] = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -419,6 +430,16 @@ async def _drive_stream(
     for iterations in range(1, ctx.max_iterations + 1):
         if deadline is not None and loop.time() > deadline:
             raise RunTimeout(f"run exceeded {ctx.timeout}s")
+
+        # Steering: drain operator guidance / honor a stop request at the turn
+        # boundary, before the next model call — never mid-turn.
+        if ctx.steer is not None:
+            if ctx.steer.stop_requested:
+                yield _TurnInfo(iterations - 1, "steered_stop")
+                return
+            for text in ctx.steer.drain():
+                messages.append(Message(role="user", content=f"[steering] {text}"))
+                yield Steered(text=text)
 
         if ctx.compactor is not None:
             messages[:] = await ctx.compactor.maybe_compact(messages)

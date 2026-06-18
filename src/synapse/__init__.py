@@ -142,7 +142,8 @@ from .runtime import (
     run_agent,
 )
 from .skill import Skill, load_skills, skill_tools
-from .streaming import RunComplete, RunEvent, TextDelta, ToolCall, ToolOutput
+from .steering import Steer
+from .streaming import RunComplete, RunEvent, Steered, TextDelta, ToolCall, ToolOutput
 from .structured import parse_output, validate_json
 from .team import Blackboard, Team
 from .tool import Tool, tool
@@ -174,7 +175,10 @@ __all__ = [
     "TextDelta",
     "ToolCall",
     "ToolOutput",
+    "Steered",
     "RunComplete",
+    # steering (mid-run control)
+    "Steer",
     # models
     "Model",
     "ModelResponse",

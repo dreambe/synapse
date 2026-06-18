@@ -50,6 +50,32 @@ detection counts per *turn*, so legitimate parallel fan-out of identical calls
 in one turn does not trip it. For a verifiable "done" condition (not just "stop
 looping"), combine with `verify=`.
 
+## Steering (mid-run control)
+
+A run shouldn't be a black box you can only kill and restart. A `Steer` channel
+lets a supervisor — a human, or another agent — correct or stop a *running*
+agent. Steering applies at the next **turn boundary** (never mid-turn), so the
+loop stays consistent.
+
+```python
+from synapse import Steer
+
+steer = Steer()
+task = asyncio.create_task(agent.arun("big task", steer=steer))
+...
+steer.send("focus on the API layer first")   # injected before the next model turn
+...
+steer.stop("that's enough")                   # graceful stop at the next boundary
+result = await task
+```
+
+Injected guidance enters the transcript as a `[steering] …` user turn, and
+streaming consumers receive a `Steered` event; a stop ends the run with
+`stop_reason == "steered_stop"`. Sends are plain (sync) calls, so you can steer
+from any context — typically you run the agent in one task and steer from
+another. *Limitation:* steering takes effect between turns, so a tool batch
+already in flight finishes before the guidance is seen.
+
 ## Long-horizon execution
 
 Treats context as the scarce resource and makes "done" mean *verified*.

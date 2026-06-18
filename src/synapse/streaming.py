@@ -46,6 +46,14 @@ class ToolOutput:
 
 
 @dataclass
+class Steered:
+    """Operator guidance was injected into the running agent (mid-run steering)."""
+
+    text: str
+    type: str = "steered"
+
+
+@dataclass
 class RunComplete:
     """Terminal event carrying the final :class:`~synapse.runtime.RunResult`."""
 
@@ -54,7 +62,7 @@ class RunComplete:
 
 
 # Public events yielded by Agent.astream / arun_stream.
-RunEvent = Union[TextDelta, ToolCall, ToolOutput, RunComplete]
+RunEvent = Union[TextDelta, ToolCall, ToolOutput, Steered, RunComplete]
 
 
 @dataclass

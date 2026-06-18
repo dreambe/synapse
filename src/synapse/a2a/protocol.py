@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from ..streaming import RunComplete, TextDelta, ToolCall, ToolOutput
+from ..streaming import RunComplete, Steered, TextDelta, ToolCall, ToolOutput
 
 
 @dataclass
@@ -61,6 +61,8 @@ def run_event_to_dict(ev: object) -> dict:
         return {"type": "tool_call", "id": ev.id, "name": ev.name, "input": ev.input}
     if isinstance(ev, ToolOutput):
         return {"type": "tool_output", "id": ev.id, "content": ev.content, "is_error": ev.is_error}
+    if isinstance(ev, Steered):
+        return {"type": "steered", "text": ev.text}
     if isinstance(ev, RunComplete):
         r = ev.result
         return {
