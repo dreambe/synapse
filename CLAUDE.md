@@ -40,8 +40,10 @@ pytest -m integration   # gated; only runs with ANTHROPIC_API_KEY / OPENAI_API_K
 - Capabilities: `observability.py` (hooks/Usage), `tracing.py`, `memory.py`
   (+ `MemoryNamespace` for per-tenant isolation), `context.py` (Compactor),
   `results.py` (offload), `plan.py`, `journal.py` (idempotency),
-  `recording.py` (run records), `verifiers.py`, `guardrails.py`, `human.py`
+  `recording.py` (run records), `monitor.py` (live activity data plane + ASGI
+  dashboard), `verifiers.py`, `guardrails.py`, `human.py`
   (escalation), `skill.py`, `structured.py`, `evaluation.py`,
+  `benchmark.py` (versioned eval standard + `synapse_benchmark()` regression spine),
   `harness.py` + `selfharness.py`, `sandbox.py`, `router.py`, `team.py`,
   `registry.py`, `checkpoint.py`.
 - `a2a/` — A2A v0.3.0 (spec/jsonrpc/dispatcher/asgi compliant server, client,

@@ -213,17 +213,25 @@ class Agent:
 
     # -- agent-to-agent ------------------------------------------------------
 
-    def as_tool(self, *, name: str | None = None, description: str | None = None) -> Tool:
+    def as_tool(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        hooks: Hooks | None = None,
+    ) -> Tool:
         """Expose this agent as a tool so another agent can delegate to it.
 
         The delegate is async, so a coordinator that calls several sub-agents
-        in one turn runs them concurrently.
+        in one turn runs them concurrently. Pass ``hooks`` (e.g. a shared
+        :class:`~synapse.monitor.Monitor`) to observe *inside* the sub-agent —
+        its runs are then linked as children of the spawning run.
         """
         agent = self
         tool_name = name or f"ask_{self.name}"
 
         async def _delegate(input: str) -> str:
-            return (await agent.arun(input)).output
+            return (await agent.arun(input, hooks=hooks)).output
 
         _delegate.__name__ = tool_name
         return Tool(

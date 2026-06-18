@@ -17,6 +17,34 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Evaluation standard (versioned benchmark).** `Benchmark` is a named,
+  versioned suite of dimension-tagged `Probe`s; running it yields a `Scorecard`
+  (per-dimension pass rates + an overall score, tagged with benchmark/synapse
+  version, model, timestamp; `save`/`load` as a baseline). `compare(baseline,
+  current)` diffs two scorecards and flags **regressions** per dimension and
+  per case — so *iterations are comparable*, not vibes. `agent_probes(agent,
+  cases)` folds an ordinary `Case` suite into a benchmark to score *your*
+  agent; the bundled `synapse_benchmark()` is the framework's own regression
+  spine — ten probes that assert *mechanism correctness* (tool use, loop
+  guards, journal idempotency, plan tracking, context offload, structured
+  output, tenant isolation, model failover, multimodal results) deterministically
+  with `ScriptedModel`. Honest scope: it measures framework mechanisms, **not**
+  model intelligence — a model-quality benchmark is a different suite built with
+  `agent_probes`.
+- **Run monitor (observability data plane + dashboard).** `Monitor` is a
+  `Hooks` implementation you attach (`hooks=monitor`) that turns a run's
+  lifecycle into a stream of structured `ActivityEvent`s and a live `RunView`
+  per run. It mints a run id at start and tracks it in a `ContextVar`, so
+  concurrent runs — and sub-agent runs that inherit the monitor — get distinct
+  ids and a correct parent→child link; `Monitor.tree()` reconstructs the
+  **agent tree** (who spawned whom). Tool calls are classified by synapse's own
+  conventions (`ask_*` → sub-agent spawn, `load_skill` → skill, `run_python` →
+  script, MCP-style names → mcp, …) so the feed reads semantically.
+  `agent.as_tool(hooks=monitor)` forwards the monitor so you can see *inside* a
+  delegated sub-agent. `monitor_app(monitor)` is a minimal dependency-free ASGI
+  dashboard (`GET /` live page, `/api/runs` tree, `/api/stream` SSE). The
+  framework owns the data plane + a reference page; a production console is an
+  app concern on the same data.
 - **Long-horizon execution (first-principles fixes).**
   - *Explicit plan* — `plan=True` gives the agent a maintained to-do list
     (`write_plan`/`update_step`), rendered into context every turn and surfaced

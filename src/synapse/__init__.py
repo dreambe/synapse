@@ -20,6 +20,17 @@ Quick start::
 from __future__ import annotations
 
 from .agent import Agent
+from .benchmark import (
+    Benchmark,
+    DimensionScore,
+    Probe,
+    ProbeResult,
+    Scorecard,
+    ScorecardDiff,
+    agent_probes,
+    compare,
+    synapse_benchmark,
+)
 from .checkpoint import Checkpointer, FileCheckpointer, InMemoryCheckpointer
 from .context import Compactor, select_tools
 from .errors import (
@@ -93,6 +104,13 @@ from .messages import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
+)
+from .monitor import (
+    ActivityEvent,
+    Monitor,
+    RunView,
+    classify_tool,
+    monitor_app,
 )
 from .models import (
     AnthropicModel,
@@ -218,6 +236,22 @@ __all__ = [
     "equals",
     "matches",
     "llm_judge",
+    # benchmark (versioned evaluation standard)
+    "Benchmark",
+    "Probe",
+    "ProbeResult",
+    "Scorecard",
+    "ScorecardDiff",
+    "DimensionScore",
+    "compare",
+    "agent_probes",
+    "synapse_benchmark",
+    # run monitor (observability data plane + dashboard)
+    "Monitor",
+    "ActivityEvent",
+    "RunView",
+    "classify_tool",
+    "monitor_app",
     # tracing
     "TracingHooks",
     "OTelHooks",
