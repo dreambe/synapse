@@ -41,7 +41,7 @@ from .errors import (
     SynapseError,
     ToolError,
 )
-from .harness import EDITABLE_SURFACES, Harness
+from .harness import DEFAULT_INSTRUCTIONS, EDITABLE_SURFACES, Harness, default_harness
 from .human import CallbackChannel, HumanChannel, human_tool
 from .journal import ExecutionJournal, FileJournal, InMemoryJournal
 from .plan import Plan, PlanStep, plan_tools
@@ -282,6 +282,8 @@ __all__ = [
     "RunRecorder",
     # self-harness
     "Harness",
+    "default_harness",
+    "DEFAULT_INSTRUCTIONS",
     "EDITABLE_SURFACES",
     "HarnessEdit",
     "EvidencePack",

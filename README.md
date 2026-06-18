@@ -244,7 +244,10 @@ result = agent.run(
 | Structured outputs | `output_schema=` / `response_model=` → `RunResult.parsed` | **solid** |
 | Tool-input validation | `validate_tool_inputs=True` | **solid** |
 | Eval harness | `Case`, `evaluate`, `contains`/`llm_judge`/… | **solid** |
+| Curated default harness (opinionated system prompt + run policy) | `default_harness()`, `DEFAULT_INSTRUCTIONS` | **solid** |
 | Self-Harness (versioned harness + regression-gated self-edit) | `Harness`, `evolve`, `model_proposer` | first cut *(experimental)* |
+| Evaluation standard (versioned benchmark + scorecard diff) | `Benchmark`, `synapse_benchmark()`, `Scorecard`, `compare` | **solid** |
+| Run monitor (live agent tree + dashboard) | `Monitor`, `monitor_app` | **solid** |
 | Tracing | `TracingHooks` (in-memory), `OTelHooks` (OpenTelemetry) | **solid** |
 | Explicit plan (decomposition + progress ledger) | `plan=True` → `write_plan`/`update_step`, `RunResult.plan` | **solid** |
 | Context offloading (large tool results) | `offload_over=`, `ResultStore`, `fetch_result` | **solid** |

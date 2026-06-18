@@ -17,6 +17,17 @@ real frontier gaps, govern concurrency, and stop overselling.
   multimodal input; server host/port coerced to `str`/`int`.
 
 ### Added
+- **Curated default harness (the framework's spine).** `default_harness()` /
+  `DEFAULT_INSTRUCTIONS` give synapse an opinionated, ready-to-use system prompt
+  — agency/persistence, plan-then-act, gather-then-act context discipline,
+  verify-before-done, honesty about uncertainty, act-on-sensible-defaults. It is
+  **synthesized from widely-shared, publicly-discussed agent-harness design
+  principles — not derived from any proprietary or leaked prompt** — and every
+  clause is wired to a mechanism synapse already ships (the default also turns on
+  the loop/circuit/no-progress guards and tool-input validation, so the prose
+  and the runtime agree). `role=`/`extra=`/overrides compose; it stays a normal
+  editable `Harness` that Self-Harness can evolve. Closes the standing "no
+  default harness content" gap.
 - **Evaluation standard (versioned benchmark).** `Benchmark` is a named,
   versioned suite of dimension-tagged `Probe`s; running it yields a `Scorecard`
   (per-dimension pass rates + an overall score, tagged with benchmark/synapse

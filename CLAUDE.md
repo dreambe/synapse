@@ -81,8 +81,11 @@ pytest -m integration   # gated; only runs with ANTHROPIC_API_KEY / OPENAI_API_K
 ## Honest boundaries / roadmap (not yet done — don't overclaim)
 
 - Never validated end-to-end against a live model (integration tests are gated).
-- No opinionated **default harness** content (the `Harness` surface exists, the
-  curated default does not) — this is the biggest "give it a spine" gap.
+- A curated **default harness** now exists (`default_harness()` /
+  `DEFAULT_INSTRUCTIONS` in `harness.py`) — synthesized from public
+  agent-harness principles, NOT any leaked/proprietary prompt; each clause is
+  wired to a mechanism synapse ships. Still a first cut to tune, but the "give
+  it a spine" gap is no longer empty.
 - Compaction (naive prefix summary) and tool-search/router (keyword) are
   first-cut heuristics.
 - No full durable execution (atomic mid-batch recovery), no global rate
